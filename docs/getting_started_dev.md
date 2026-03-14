@@ -54,11 +54,16 @@ python main.py
 
 ---
 
-## 🧪 单元测试
-项目包含针对核心组件（如 Registry、Client）的自动化测试：
+## 🧪 单元测试与覆盖率
+项目提供了自动化测试脚本，执行后会生成 HTML 覆盖率报告：
 ```bash
-pytest tests/
+# 运行所有测试并获取报告路径
+./scripts/run_tests.sh
 ```
+该脚本会自动：
+1. 设置 `PYTHONPATH` 环境变量。
+2. 运行所有 pytest 测试用例。
+3. 打印出 HTML 覆盖率报告的 **绝对路径**，方便你直接预览。
 
 > [!WARNING]
 > **资源占用说明**：某些 MCP 服务（如浏览器驱动）可能会非常消耗资源或保持进程常驻。如果发现系统响应变慢，请通过 `ps aux | grep node` 或 `ps aux | grep python` 检查是否有僵尸进程。
