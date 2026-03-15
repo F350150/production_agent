@@ -16,7 +16,7 @@ class TestSkillRegistry:
         import importlib
         # 兼容两种导入方式：作为包还是直接运行
         try:
-            sreg_module = importlib.import_module("production_agent.skills.skill_registry")
+            sreg_module = importlib.import_module("skills.skill_registry")
         except ImportError:
             sreg_module = importlib.import_module("skills.skill_registry")
         RegistryClass = sreg_module.SkillRegistry
@@ -79,7 +79,7 @@ class TestWebResearchSkill:
     """测试 WebResearchSkill 的执行逻辑（Mock 底层工具）"""
 
     def setup_method(self):
-        from production_agent.skills.builtin.web_research import WebResearchSkill
+        from skills.builtin.web_research import WebResearchSkill
         self.skill = WebResearchSkill()
 
     def test_execute_missing_query_returns_error(self):
@@ -129,7 +129,7 @@ class TestCodeReviewSkill:
     """测试 CodeReviewSkill 的执行逻辑（Mock 底层工具）"""
 
     def setup_method(self):
-        from production_agent.skills.builtin.code_review import CodeReviewSkill
+        from skills.builtin.code_review import CodeReviewSkill
         self.skill = CodeReviewSkill()
 
     def test_execute_missing_path_returns_error(self):

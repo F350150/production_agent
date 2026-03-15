@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, patch
-from production_agent.skills.builtin.code_review import CodeReviewSkill
+from skills.builtin.code_review import CodeReviewSkill
 
 def test_code_review_skill_logic():
     """验证代码评审技能的逻辑流程"""

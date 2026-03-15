@@ -3,6 +3,7 @@ import signal
 import sys
 import os
 from pathlib import Path
+import asyncio
 
 # 确保当前目录在 sys.path 中，使得跨目录运行 python main.py 也能通过顶级包名导入
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -12,10 +13,11 @@ if current_dir not in sys.path:
 import readline  # noqa: F401 — 仅 import 即可让 input() 自动获得方向键历史功能 (macOS/Linux)
 import rlcompleter  # noqa: F401 — Tab 补全支持
 from utils.paths import LOG_FILE, HISTORY_FILE
-from managers.database import load_session, save_session, clear_session, print_cost_report, close_db
-from tools.mcp_registry import mcp_registry
+from managers.database import get_db_conn, save_session, load_session, clear_session, print_cost_report, close_db
+from core import BUS, TODO
 from core.swarm import SwarmOrchestrator, console
-from core.loop import BUS, TODO
+from core.llm import TokenCounterCallback, MODEL_ID
+from tools.mcp_registry import mcp_registry
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -118,7 +120,7 @@ def cleanup(swarm=None):
     except Exception as e:
         print(f"\033[91m[Cleanup error: {e}]\033[0m")
 
-def main():
+async def main():
     """
     终端互动入口 (REPL: Read-Eval-Print-Loop)
     
@@ -133,7 +135,7 @@ def main():
     """
     welcome_txt = Text.assemble(
         (" Production Autonomous Software Engineer Agent ", "bold white on blue"),
-        ("\n [Phase 5: Premium Swarm & HITL Enabled] ", "cyan italic")
+        (f"\n [LangChain 1.0 + LangGraph Swarm | {MODEL_ID}] ", "cyan italic")
     )
     console.print(Panel(welcome_txt, border_style="blue", expand=False))
 
@@ -167,15 +169,19 @@ def main():
                         # 提前触发工具发现，让用户看到连接过程
                         from tools.registry import ToolRegistry
                         ToolRegistry._ensure_initialized()
-                        
-                        swarm = SwarmOrchestrator(BUS, TODO, interrupt_checker=_check_interrupt)
+
+                        # 初始化 TEAM 管理器（用于后台子 Agent）
+                        from core import TEAM as team_manager
+
+                        swarm = SwarmOrchestrator(BUS, TODO, team_manager=team_manager, interrupt_checker=_check_interrupt)
                         history_dict = load_session("swarm_modular")
                         if history_dict and isinstance(history_dict, dict):
                             swarm.agent_contexts = history_dict
 
                 if query.strip() == "/clear":
                     clear_session("swarm_modular")
-                    swarm = SwarmOrchestrator(BUS, TODO, interrupt_checker=_check_interrupt)
+                    from core import TEAM as team_manager
+                    swarm = SwarmOrchestrator(BUS, TODO, team_manager=team_manager, interrupt_checker=_check_interrupt)
                     print("\033[33m[Session successfully cleared. Starting fresh.]\033[0m")
                     continue
 
@@ -197,8 +203,26 @@ def main():
                 swarm.inject_user_message("ProductManager", query)
 
                 try:
-                    # 开始由引擎接管，执行循环。
-                    swarm.run_swarm_loop("ProductManager")
+                    # 开始由引擎接管，执行并发异步循环。
+                    final_role = await swarm.run_swarm_loop("ProductManager")
+
+                    # 显示最终的 AI 响应
+                    from rich.markdown import Markdown
+                    role_msgs = swarm.agent_contexts.get(final_role, [])
+                    assistant_msgs = [m for m in role_msgs if isinstance(m, dict) and m.get("role") == "assistant"]
+                    if assistant_msgs:
+                        last_content = assistant_msgs[-1].get("content", "")
+                        if isinstance(last_content, list):
+                            text_parts = [b.get("text", "") for b in last_content if isinstance(b, dict) and b.get("type") == "text"]
+                            last_content = "\n".join(text_parts)
+                        if last_content:
+                            console.print()
+                            console.rule(f"[bold magenta]{final_role} Response")
+                            console.print(Markdown(str(last_content)))
+                            console.rule()
+                            console.print()
+
+                    console.print(f"\n[dim][{final_role}] Yielding back to user.[/dim]")
                 except (InterruptedError, KeyboardInterrupt):
                     # 无论是自定义拦截还是直接 Ctrl+C，都在这里安全着陆并返回提示符
                     console.print("\n[bold yellow]⚠ Interaction interrupted. Returning to prompt...[/bold yellow]")
@@ -223,4 +247,7 @@ def main():
         cleanup(swarm)
 
 if __name__ == "__main__":
-    main()
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass

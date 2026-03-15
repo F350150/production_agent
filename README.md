@@ -12,27 +12,37 @@
 
 ---
 
-## 🌟 核心特性 (Features)
+## 🌟 为什么选择这个项目？ (Why This Project?)
 
-1. **ReAct 核心调度引擎 (Core Loop)**
-   - 具备思考、行动、反馈的核心循环能力。
-   - **流式输出 (Streaming UX)**: 终端打字机效果呈现 Agent 的实时思考流。
-   - **自动化记忆管家 (Context Management)**: 支持毫秒级 Micro 压缩、超过30回合时的历史 LLM 摘要抽提（Auto Compact）、以及强制洗脑重启（Manual Compress），避免因对话过长导致的 API 账单超支或上下文溢出崩溃。
-   - **无限死循环熔断器 (Circuit Breaker Tracker)**: 当 Agent 陷入反复报错的死胡同（连续4次）时，自动暂停并向人类告警止损。
+对于开发者来说，这不仅仅是一个 Agent 演示，更是一个**生产级 AI 工程实践的教学范式**：
+- **从传统 Loop 到图拓扑**：展示如何从繁琐的 `while True` 循环迁移到可预测、可观察的 LangGraph 状态机。
+- **模块化设计**：工具发现 (MCP)、长短期记忆 (SQLite Persistence)、财务统计 (Cost Counter) 全部解耦成独立包。
+- **真实生产环境考量**：内置 Docker 沙盒、安全审批钩子 (HITL) 和全量日志追踪。
 
-2. **状态与数据持久化 (SQLite Managers Layer)**
-   - 彻底摒弃由于多线程频繁读写而容易损坏的 JSON 文件锁，拥抱 SQLite 实现持久化。
-   - **任务拓扑 (TaskManager)**: 构建父子任务与依赖阻塞网状结构 (DAG)。
-   - **异步事件总线 (MessageBus)**: 持久化并调度主从多 Agent 之间的通信队列。
-   - **对话记忆断点续传 (Session Resume)**: 按下 Ctrl+C 退出后，下次启动可瞬间恢复当前工作进度。
-   - **真实成本计算器 (Token Metrics Tracker)**: `metrics` 数据表拦截并永久累加计费 Token，提供终端实时核算。
+---
 
-3. **物理世界降维打击 (Tools Layer)**
-   - **AST Repomap 语法树骨架扫描**: 能够迅速提取长达数十万行代码工程中所有的类与函数签名，不看实现只看接口，解决超大项目的上下文溢出问题。
-   - **RAG Local Vector Database**: 内置离线的 ChromaDB 配合 Sentence-Transformers，Agent 可通过自然语言（Semantic Search）从海量代码仓库中大海捞针式定位核心模块。
-   - **Runtime Sandbox (运行隔离环境)**: 直连宿主机的 Docker Daemon，Agent 决定执行高风险脚本时，秒级拉起一个丢弃式的 `python-slim` 虚拟容器执行，彻底保障您的 Mac/PC 安全。
-   - **Human-in-the-Loop (HITL 审批)**: 对于 `rm -rf`, 覆盖敏感文件等危险操作，Agent 将让出控制权，将 CLI 挂起等待人类敲击 `Y/n` 进行确认。
-   - **外界直连 (Web Browsing)**: 打通 `duckduckgo` 搜索与抓取网页脱水文本，使得 Agent 能够自主去网上查阅修复 Unknown Bug 或阅读最新开源库的官网文档。
+## 🏗️ 核心技术栈 (Modern AI Stack)
+
+本项目依托现代 AI 开发标准构建，是深入掌握以下技术的绝佳起点：
+
+- **LangChain 1.0**: 统一的 LLM 抽象层，集成了丰富的工具库与内存模型。
+- **LangGraph Swarm**: 使用 `StateGraph` 实现多角色编排。**PM -> Architect -> Coder -> QA** 的流转不再是硬编码，而是图计算。
+- **Model Context Protocol (MCP)**: 革命性的能力发现协议。Agent 可以在运行时动态“学会”使用本地数据库或外部 API。
+- **SQLite 异步持久化**: 集成 `AsyncSqliteSaver`，支持对话状态的长效保存与故障恢复，即刻拥有 production-ready 的记忆力。
+- **精细化安全审核 (HITL)**: 自研工具拦截逻辑，自动通过低风险操作，强制拦截高危执行（如 Bash 写入）。
+
+---
+
+## 🎓 学习与实战 (For Beginners)
+
+如果你是 AI 开发初学者，我们为你准备了循序渐进的实验室指南：
+
+👉 **[点击开始：AI Beginner Lab 动手实验室](./docs/ai_beginner_lab.md)**
+
+了解更多核心设计：
+- [多智能体 Swarm 编排协议](./docs/swarm_topology.md)
+- [状态管理与 SQLite 持久化](./docs/database_schema.md)
+- [工具发现与 MCP 协议](./docs/mcp_development.md)
 
 ---
 
@@ -43,20 +53,12 @@
 - （可选）Docker Desktop：仅用于启用原生沙盒环境 `sandbox_bash` 功能。
 
 ### 2. 安装依赖库
-我们使用了业界主流的最佳实践库，请在你的虚拟环境中安装它们：
 ```bash
-pip install anthropic python-dotenv
-```
-如果需要开启进阶感知功能（推荐）：
-```bash
-# Web 搜索和 HTML 解析引擎
-pip install duckduckgo-search requests beautifulsoup4
+# 安装核心依赖
+pip install langchain langchain-anthropic langgraph langgraph-checkpoint-sqlite aiosqlite python-dotenv rich nest_asyncio
 
-# Docker 守护进程操控 SDK
-pip install docker
-
-# 本地断网可用的 RAG 向量引擎
-pip install chromadb sentence-transformers
+# 安装进阶感知功能（推荐）
+pip install playwright pyautogui mss beautifulsoup4 duckduckgo-search docker chromadb sentence-transformers
 ```
 *(注：架构内部存在平滑降级机制，若未安装某项进阶库，相关的 Tool 会返回友好的警报让 Agent 指导您后续安装，**而不会让整个程序 Crash 罢工**。)*
 
@@ -79,8 +81,14 @@ MODEL_ID=claude-3-5-sonnet-20241022
 
 请在你的工程根目录执行以下命令，唤起 REPL（Read-Eval-Print-Loop）命令交互面板：
 
+### 1. 终端模式 (CLI Mode)
 ```bash
 python -m production_agent.main
+```
+
+### 2. 网页管理模式 (Web UI Mode)
+```bash
+streamlit run production_agent/streamlit_app.py
 ```
 
 ### 终端内连指令 (Built-in Commands)
@@ -93,18 +101,19 @@ python -m production_agent.main
 
 ---
 
-## 🗺️ 未来更新计划 (Roadmap & Future Plans)
+## 📝 更新日志 (Changelog)
 
-这个生产级 Agent 骨架目前已经达到了业界商用方案 70% 的基底能力，后续如果想将其扩展为完整无懈可击的企业级框架，我们制定了以下演进路线（Phase 3 & Phase 4）：
+### [2026-03-15] - Phase 5 Observability & Web UI
+- **[新内核能力]**: `SwarmOrchestrator` 支持实时事件回调 (Callback Mechanism)，解耦引擎与 UI 展现。
+- **[链路追踪]**: 集成 LangSmith 探针，由底层 `core/llm.py` 自动捕捉所有推理链路与 Token 成本。
+- **[可视化前台]**: 新增基于 Streamlit 的 Web 用户界面 (`streamlit_app.py`)，支持实时观察多智能体节点流转。
+- **[文档补全]**: 新增可观测性与 Web UI 专用技术指南。
 
-### 💡 Phase 3: 多模态感知与桌面级操控 (Multi-modal & Computer Use)
-- **视觉能力接入 (Computer Use Tool)**: 引入 `pyautogui` 和 `mss` 等工具。允许 Agent 自动截取当前的 IDE 屏幕或网页渲染图，将图像数据直接通过大模型的 Vision 能力传入，让 Agent 真正做到“看见 UI 问题”，而不仅仅是在终端里阅读盲文。
-- **自动化浏览器操控 (Playwright System)**: 将 `web_tools` 中简陋的 `requests` 爬虫替换为真实的无头浏览器 (Headless Playwright)。支持 Agent 自主登录网页、点击按钮、拦截验证码等复杂的网络交互动作。
+---
 
-### 🛠️ Phase 4: 多智能体图灵拓扑 (Multi-Agent Swarm Topology)
--目前的 `team.py` (TeammateManager) 还停留在初步的 Spawn/Worker 状态，未来将引入基于图论的 **Swarm 路由模型**。
-- 将原本单一的 Lead Agent 打散为 `[ProductManager(提需求)] -> [Architect(画UML/图纸)] -> [Coder(写代码)] -> [QA_Reviewer(写单测发现找错)]` 四角流水线工作流，并通过 `messages` 表构建复杂的审批链网络，用群智结对编程大幅降低单一大模型的幻觉率。
+### 💡 Phase 6: 企业级扩展
+- **多租户权限控制 (RBAC)**: 为不同用户分配不同的工具执行权限与 API 配额。
+- **分布式 Agent 节点**: 支持将子 Agent 调度到不同的远程算力节点执行高并发任务。
 
-### 📊 Phase 5: 可观测性与可视化前台 (Observability & Web UI)
-- **LangSmith / DataDog 探针接入**: 替换目前简单的 `.agent_trace.log`，将所有大模型的中间思考步骤和耗时上传到云端 Tracing 系统。
-- **Streamlit / Next.js 管理大盘**: 摒弃 CLI 终端的局限，提供一个网页可视化看板（Web GUI），人类可以在页面上拖拽管理 `[Tasks]` 有向无环图、查看团队每一个 `Teammate` 正在做的事、以及点击审核 HITL 危险命令弹窗。
+### 📊 Phase 5: 进阶可观察性 (Completed) ✅
+- **自定义看板**: 未来将引入更多业务维度的监控（如子任务成功率分布）。

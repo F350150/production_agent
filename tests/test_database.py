@@ -2,20 +2,20 @@ import os
 import sqlite3
 import threading
 import pytest
-from production_agent.managers.database import get_db_conn, DB_LOCK, close_db
+from managers.database import get_db_conn, DB_LOCK, close_db
 
 @pytest.fixture(autouse=True)
 def isolate_db(tmp_path, monkeypatch):
     """为每个测试隔离数据库"""
     db_file = tmp_path / "test.db"
     # 注入测试用的临时路径
-    monkeypatch.setattr("production_agent.managers.database.DB_PATH", str(db_file))
+    monkeypatch.setattr("managers.database.DB_PATH", str(db_file))
     # 强制重置全局连接，确保使用新生成的连接
-    monkeypatch.setattr("production_agent.managers.database._DB_CONN", None)
+    monkeypatch.setattr("managers.database._DB_CONN", None)
     yield
     # 测试结束后关闭并再次重置
     close_db()
-    monkeypatch.setattr("production_agent.managers.database._DB_CONN", None)
+    monkeypatch.setattr("managers.database._DB_CONN", None)
 
 def test_db_initialization():
     """验证数据库初始化并能创建核心表"""
@@ -68,7 +68,7 @@ def test_session_save_and_load():
     session_id = "test_session_123"
     messages = [{"role": "user", "content": "Hello DB"}]
     
-    from production_agent.managers.database import save_session, load_session
+    from managers.database import save_session, load_session
     
     with DB_LOCK:
         save_session(session_id, messages)
@@ -87,7 +87,7 @@ def test_session_save_and_load():
 
 def test_token_usage_and_report():
     """验证 Token 计数与报告打印"""
-    from production_agent.managers.database import record_token_usage, print_cost_report
+    from managers.database import record_token_usage, print_cost_report
     
     # 记录一些使用量
     record_token_usage(1000, 500)
@@ -103,7 +103,7 @@ def test_token_usage_and_report():
 
 def test_clear_session():
     """验证清除会话数据"""
-    from production_agent.managers.database import save_session, load_session, clear_session
+    from managers.database import save_session, load_session, clear_session
     sid = "clear_me"
     save_session(sid, [{"r": "u", "c": "x"}])
     assert len(load_session(sid)) == 1
@@ -113,6 +113,6 @@ def test_clear_session():
 
 def test_close_db_idempotency():
     """验证多次关闭数据库无碍"""
-    from production_agent.managers.database import close_db
+    from managers.database import close_db
     close_db()
     close_db() # 应该不报错

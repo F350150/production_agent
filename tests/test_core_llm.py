@@ -1,11 +1,11 @@
 import pytest
 from unittest.mock import MagicMock, patch
 import anthropic
-from production_agent.core.llm import LLMProvider
+from core.llm import LLMProvider
 
 @pytest.fixture
 def mock_client():
-    with patch("production_agent.core.llm.client") as mock:
+    with patch("core.llm.client") as mock:
         yield mock
 
 def test_llm_provider_safe_call_success(mock_client):
@@ -19,7 +19,7 @@ def test_llm_provider_safe_call_success(mock_client):
     mock_client.messages.create.return_value = mock_response
     
     # patch record_token_usage
-    with patch("production_agent.core.llm.record_token_usage") as mock_record:
+    with patch("core.llm.record_token_usage") as mock_record:
         # safe_llm_call 是静态方法
         response = LLMProvider.safe_llm_call(messages=[{"role": "user", "content": "hi"}], system_prompt="sys")
         assert response == mock_response
@@ -39,7 +39,7 @@ def test_llm_provider_retry_logic(mock_client):
     ]
     
     with patch("time.sleep"): # 避免测试变慢
-        with patch("production_agent.core.llm.record_token_usage"):
+        with patch("core.llm.record_token_usage"):
             response = LLMProvider.safe_llm_call(messages=[{"role": "user", "content": "hi"}], system_prompt="sys")
             assert response == mock_response
             assert mock_client.messages.create.call_count == 2

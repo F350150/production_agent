@@ -1,11 +1,11 @@
 import pytest
 from unittest.mock import MagicMock
-from production_agent.managers.team import TeammateManager
+from managers.team import TeammateManager
 
 @pytest.fixture
 def mock_db(monkeypatch):
     mock_conn = MagicMock()
-    monkeypatch.setattr("production_agent.managers.team.get_db_conn", lambda: mock_conn)
+    monkeypatch.setattr("managers.team.get_db_conn", lambda: mock_conn)
     return mock_conn
 
 def test_team_manager_spawn_new(mock_db):

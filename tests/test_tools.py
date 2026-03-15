@@ -2,8 +2,8 @@ import os
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-from production_agent.tools.ast_tools import ASTTools
-from production_agent.tools.system_tools import SystemTools
+from tools.ast_tools import ASTTools
+from tools.system_tools import SystemTools
 
 def test_ast_parse_python():
     """测试 AST 工具是否能正确解析 Python 文件结构"""
@@ -38,7 +38,7 @@ def test_write_file_tool(tmp_path):
     """测试写入文件工具（使用 tmp_path 真实写入）"""
     test_file = tmp_path / "output.txt"
     # 我们需要 patch SystemTools.WORKDIR 否则它会去 WORKSPACE_DIR
-    with patch("production_agent.tools.system_tools.WORKDIR", tmp_path):
+    with patch("tools.system_tools.WORKDIR", tmp_path):
         result = SystemTools.write_file(path="output.txt", content="hello world")
     
     assert "Success" in result

@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, patch
-from production_agent.managers.tasks import TaskManager
+from managers.tasks import TaskManager
 
 @pytest.fixture
 def task_manager():
@@ -24,13 +24,13 @@ def test_create_task(task_manager):
     assert "Task" in task_id_info and "created" in task_id_info
     
     # 验证是否通过 get_db_conn 调用了 execute
-    with patch("production_agent.managers.tasks.get_db_conn") as mock_get_conn:
+    with patch("managers.tasks.get_db_conn") as mock_get_conn:
         task_manager.create(subject="T2", description="D2")
         assert mock_get_conn.return_value.cursor.return_value.execute.called
 
 def test_update_task_status(task_manager):
     """测试更新任务状态"""
-    with patch("production_agent.managers.tasks.get_db_conn") as mock_get_conn:
+    with patch("managers.tasks.get_db_conn") as mock_get_conn:
         # 模拟 fetchone 返回一个 dict-like 对象
         mock_get_conn.return_value.execute.return_value.fetchone.return_value = {
             'status': 'pending',
@@ -46,6 +46,6 @@ def test_check_dependencies_noop(task_manager):
 
 def test_list_all_tasks(task_manager):
     """测试获取全部任务"""
-    with patch("production_agent.managers.tasks.get_db_conn") as mock_get_conn:
+    with patch("managers.tasks.get_db_conn") as mock_get_conn:
         task_manager.list_all()
         assert mock_get_conn.return_value.execute.called

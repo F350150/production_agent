@@ -17,7 +17,7 @@ import inspect
 import logging
 import os
 from pathlib import Path
-from typing import Callable
+from typing import Dict, Any, List, Type, Optional, Callable
 
 from skills.base import Skill
 
@@ -35,7 +35,7 @@ class SkillRegistry:
         handler = registry.get_skill_handler(tool_handlers)  # -> callable
     """
 
-    _instance: "SkillRegistry | None" = None
+    _instance: Optional["SkillRegistry"] = None
     _skills: dict[str, Skill] = {}
     _initialized: bool = False
 
@@ -89,7 +89,7 @@ class SkillRegistry:
         self._initialized = True
         return self
 
-    def _scan_directory(self, directory: Path, package_prefix: str | None):
+    def _scan_directory(self, directory: Path, package_prefix: Optional[str]):
         """扫描目录，导入所有 .py 文件并注册 Skill 子类"""
         if not directory.exists():
             return
@@ -125,7 +125,7 @@ class SkillRegistry:
         """返回所有已注册技能的名称列表"""
         return list(self._skills.keys())
 
-    def get_skill_tool_schema(self) -> dict | None:
+    def get_skill_tool_schema(self) -> Optional[dict]:
         """
         生成 use_skill 工具的 Anthropic Schema。
         若没有技能则返回 None（不向 LLM 暴露空工具）。

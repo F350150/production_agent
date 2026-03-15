@@ -30,7 +30,7 @@ import json
 import logging
 import os
 import threading
-from typing import Callable
+from typing import Callable, Optional
 
 from tools.mcp_client import MCPClientBase, create_mcp_client
 
@@ -90,7 +90,7 @@ class MCPRegistry:
     将 MCP 工具无缝并入原有的工具集，对 LLM 透明。
     """
 
-    _instance: "MCPRegistry | None" = None
+    _instance: Optional["MCPRegistry"] = None
     _mcp_clients: dict[str, MCPClientBase] = {}
     _mcp_schemas: list[dict] = []
     _initialized: bool = False

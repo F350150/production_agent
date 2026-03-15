@@ -15,6 +15,9 @@
 ```bash
 # 进入项目根目录
 pip install -e .
+
+# 安装 Web UI 与 观测链路依赖
+pip install streamlit langsmith
 ```
 
 ### 3. 配置秘密文件 (.env)
@@ -51,6 +54,10 @@ python main.py
 ### 3. 热清理 (Reset State)
 -   **软件层**：在 CLI 输入 `/clear`。这会重置当前对话，但保留数据库连接。
 -   **物理层**：完全关闭进程并删除 `data/` 目录下的 `.db` 文件。这是处理各种奇葩死锁或状态污染的终极手段。
+
+### 4. 链路追踪与观测 (Observability)
+-   如果你开启了 `LANGSMITH_TRACING=true`，所有的执行逻辑都会同步到云端。
+-   在 `main.py` 报错时，除了看控制台，还可以直接去 LangSmith 后台定位具体是哪一轮对话出的问题。
 
 ---
 

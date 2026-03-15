@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock
-from production_agent.skills.builtin.web_research import WebResearchSkill
+from skills.builtin.web_research import WebResearchSkill
 
 def test_web_research_skill_full_flow():
     """测试完整的 WebResearchSkill 流程（搜索+抓取）"""

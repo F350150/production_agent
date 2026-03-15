@@ -1,9 +1,23 @@
+"""
+core/llm.py - LLM 交互核心模块 (LangChain 1.0 重构版)
+
+功能：
+- 基于 langchain-anthropic 的 ChatAnthropic 标准化接入
+- Token 统计与成本追踪（通过 LangChain Callback 自动化）
+- LangSmith 追踪内置（无需手动装饰器）
+- 保留流式输出的 Rich 终端渲染
+"""
+
 import os
-import time
 import logging
-import anthropic
-from anthropic import Anthropic
+from typing import Optional, List
 from dotenv import load_dotenv
+
+from langchain_anthropic import ChatAnthropic
+from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
+from langchain_core.tools import BaseTool
+
 from utils.paths import get_env_path
 from managers.database import record_token_usage
 
@@ -14,84 +28,74 @@ env_path = get_env_path()
 if env_path:
     load_dotenv(dotenv_path=env_path)
 else:
-    load_dotenv() # 尝试默认位置
+    load_dotenv()
+
 API_KEY = os.getenv("ANTHROPIC_API_KEY")
 BASE_URL = os.getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
-MODEL_ID = os.getenv("MODEL_ID", "claude-3-5-sonnet-20241022")
+MODEL_ID = os.getenv("MODEL_ID", "claude-sonnet-4-20250514")
 
-# 如果没有配置 key，提示用户
 if not API_KEY:
     print("\033[91mError: ANTHROPIC_API_KEY is not set in environment or .env file.\033[0m")
-    
-client = Anthropic(api_key=API_KEY, base_url=BASE_URL) if API_KEY else None
 
-class LLMProvider:
+
+class TokenCounterCallback(BaseCallbackHandler):
     """
-    大语言模型通信驱动层 (LLM Provider)
-    
+    Token 用量追踪回调 (Token Counter Callback)
+
     【设计意图】
-    生产环境中直接调用 API 是不可靠的（网络波动、触碰速率限制等）。
-    此处封装了带指数退避的重试机制（Exponential Backoff Retry），
-    同时无缝集成了 `stream=True` 的终端打字机效果，并且在数据回包时自动将消费记录（Token Usage）
-    挂载入全局 SQLite 中。
+    LangChain 1.0 通过 Callback 机制在 LLM 响应完成后自动获取 Token 消耗信息。
+    我们将每一次调用的 Input/Output Token 持久化到 SQLite 的 metrics 表中，
+    与原来手写的 record_token_usage 保持完全兼容。
     """
-    
-    @staticmethod
-    def safe_llm_call(messages: list, system_prompt: str, tools: list = None, stream: bool = False, max_retries: int = 3):
-        """带有退避重试和打字机流式输出的统一调用入口"""
-        if not client:
-            raise RuntimeError("API client not initialized. Check your ANTHROPIC_API_KEY.")
-            
-        kwargs = {
-            "model": MODEL_ID,
-            "max_tokens": 4096,
-            "system": system_prompt,
-            "messages": messages,
-        }
-        if tools:
-            kwargs["tools"] = tools
+    def on_llm_end(self, response, **kwargs):
+        """LLM 调用结束时记录 Token 用量"""
+        try:
+            if response and response.llm_output:
+                usage = response.llm_output.get("token_usage", {})
+                input_tokens = usage.get("prompt_tokens", 0) or usage.get("input_tokens", 0)
+                output_tokens = usage.get("completion_tokens", 0) or usage.get("output_tokens", 0)
+                if input_tokens or output_tokens:
+                    record_token_usage(input_tokens, output_tokens)
+        except Exception as e:
+            logger.debug(f"Token counter callback error: {e}")
 
-        for attempt in range(max_retries):
-            try:
-                if stream:
-                    from rich.console import Console
-                    from rich.markdown import Markdown
-                    from rich.live import Live
-                    from rich.padding import Padding
-                    rich_console = Console()
-                    
-                    # 打印装饰线
-                    rich_console.print()
-                    rich_console.rule("[bold magenta]Agent Reasoning / Thought")
-                    
-                    full_text = ""
-                    # 使用 Live 来平稳展现 Markdown，防止频繁重绘导致的 ANSI 爆炸
-                    with Live("", console=rich_console, refresh_per_second=8, vertical_overflow="visible") as live:
-                        with client.messages.stream(**kwargs) as stream_ctx:
-                            for text in stream_ctx.text_stream:
-                                full_text += text
-                                # 实时展现 Markdown 效果 (比原生的 print 更稳健且美观)
-                                live.update(Markdown(full_text))
-                    
-                    rich_console.rule() 
-                    rich_console.print()
-                    
-                    final_msg = stream_ctx.get_final_message()
-                    if hasattr(final_msg, "usage"):
-                        record_token_usage(final_msg.usage.input_tokens, final_msg.usage.output_tokens)
-                    return final_msg
-                else:
-                    # 后台子系统/Teammates 默认静默通信
-                    resp = client.messages.create(**kwargs)
-                    if hasattr(resp, "usage"):
-                        record_token_usage(resp.usage.input_tokens, resp.usage.output_tokens)
-                    return resp
-                    
-            except (anthropic.APIError, anthropic.RateLimitError) as e:
-                # 触发限流或网络错误，指数退避
-                if attempt == max_retries - 1:
-                    logger.error(f"LLM API failed after {max_retries} attempts. Error: {e}")
-                    raise
-                wait = 2 ** attempt
-                logger.warning(f"API Error ({e}), retrying in {wait}s...")
-                time.sleep(wait)
+
+# --- 全局 LLM 实例 ---
+token_counter = TokenCounterCallback()
+
+
+def get_llm(streaming: bool = False) -> ChatAnthropic:
+    """
+    获取标准化的 ChatAnthropic 实例
+
+    【设计意图】
+    统一的 LLM 工厂函数。所有组件（Agent、Swarm、Subagent）都通过此函数获取 LLM，
+    确保配置一致性。LangSmith 追踪在 LangChain 1.0 中是自动开启的（只要设置了环境变量），
+    无需手动添加 @traceable 装饰器。
+
+    参数：
+    - streaming: 是否启用流式输出
+    """
+    if not API_KEY:
+        raise RuntimeError("API client not initialized. Check your ANTHROPIC_API_KEY.")
+
+    kwargs = {
+        "model": MODEL_ID,
+        "api_key": API_KEY,
+        "max_tokens": 8192,
+        "streaming": streaming,
+        "callbacks": [token_counter],
+    }
+
+    # 兼容第三方中转网关
+    if BASE_URL and BASE_URL != "https://api.anthropic.com":
+        kwargs["base_url"] = BASE_URL
+
+    return ChatAnthropic(**kwargs)
+
+
+# 预构建的全局实例（供快速访问）
+# 非流式版本（用于后台 Agent、Subagent、压缩等）
+llm = get_llm(streaming=False)
+# 流式版本（用于终端交互的实时打字机效果）
+llm_streaming = get_llm(streaming=True)

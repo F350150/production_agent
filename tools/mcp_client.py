@@ -19,8 +19,10 @@ import logging
 import subprocess
 import threading
 import time
+import sys
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Optional
+from rich.console import Console
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +91,7 @@ class StdioMCPClient(MCPClientBase):
         self.command = command
         self.timeout = timeout
         self._lock = threading.Lock()
-        self._process: subprocess.Popen | None = None
+        self._process: Optional[subprocess.Popen] = None
         self._initialized = False
 
         # 启动子进程
@@ -113,7 +115,7 @@ class StdioMCPClient(MCPClientBase):
     # 内部 JSON-RPC 通信
     # ──────────────────────────────────────────────
 
-    def _send(self, method: str, params: dict | None = None) -> dict:
+    def _send(self, method: str, params: Optional[dict] = None) -> dict:
         """发送 JSON-RPC 请求并同步等待响应"""
         req_id = _next_rpc_id()
         payload = {"jsonrpc": "2.0", "id": req_id, "method": method}
@@ -233,8 +235,8 @@ class SSEMCPClient(MCPClientBase):
         super().__init__(name)
         self.url = url.rstrip("/")
         self.timeout = timeout
-        self._session_id: str | None = None
-        self._messages_url: str | None = None
+        self._session_id: Optional[str] = None
+        self._messages_url: Optional[str] = None
         self._connect()
 
     def _connect(self):
@@ -256,7 +258,7 @@ class SSEMCPClient(MCPClientBase):
             logger.error(f"[MCP-SSE] Connection failed for '{self.name}': {e}")
             raise
 
-    def _rpc(self, method: str, params: dict | None = None) -> dict:
+    def _rpc(self, method: str, params: Optional[dict] = None) -> dict:
         """通过 POST 发送 JSON-RPC 请求到 MCP messages endpoint"""
         import httpx
         req_id = _next_rpc_id()

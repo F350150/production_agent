@@ -1,7 +1,7 @@
 import pytest
 import json
 from unittest.mock import MagicMock, patch
-from production_agent.core.swarm import SwarmOrchestrator, _serialize_content
+from core.swarm import SwarmOrchestrator, _serialize_content
 
 def test_serialize_content_handles_various_blocks():
     """测试 _serialize_content 对不同 Block 类型的转换"""
@@ -43,9 +43,9 @@ class TestSwarmOrchestrator:
         todo.list_all.return_value = "No tasks."
         return bus, todo
 
-    @patch("production_agent.core.swarm.LLMProvider.safe_llm_call")
-    @patch("production_agent.core.swarm.ToolRegistry.get_role_tools")
-    @patch("production_agent.core.swarm.console")
+    @patch("core.swarm.LLMProvider.safe_llm_call")
+    @patch("core.swarm.ToolRegistry.get_role_tools")
+    @patch("core.swarm.console")
     def test_run_swarm_loop_handover_logic(self, mock_console, mock_get_tools, mock_llm, mock_deps):
         """测试 Agent 之间的 Handover 交接逻辑"""
         bus, todo = mock_deps
@@ -84,14 +84,14 @@ class TestSwarmOrchestrator:
         assert final_role == "Architect"
         bus.send.assert_called_once_with(sender="ProductManager", recipient="Architect", content="PRD ready", msg_type="handover")
 
-    @patch("production_agent.core.swarm.LLMProvider.safe_llm_call")
-    @patch("production_agent.core.swarm.console")
+    @patch("core.swarm.LLMProvider.safe_llm_call")
+    @patch("core.swarm.console")
     def test_run_swarm_loop_safety_guard_denied(self, mock_console, mock_llm, mock_deps):
         """测试破坏性工具被用户拒绝执行"""
         bus, todo = mock_deps
         orch = SwarmOrchestrator(bus, todo)
         
-        with patch("production_agent.core.swarm.ToolRegistry.get_role_tools") as mock_get_tools:
+        with patch("core.swarm.ToolRegistry.get_role_tools") as mock_get_tools:
             mock_get_tools.return_value = [{"name": "rm_rf", "is_destructive": True}]
             orch.handlers = {"rm_rf": MagicMock()}
             
@@ -122,3 +122,46 @@ class TestSwarmOrchestrator:
             history = orch.agent_contexts["ProductManager"]
             content_str = str([msg.get("content", "") for msg in history])
             assert "denied" in content_str.lower()
+
+    @patch("core.swarm.LLMProvider.safe_llm_call")
+    @patch("core.swarm.ToolRegistry.get_role_tools")
+    @patch("core.swarm.console")
+    @patch("tools.system_tools.SystemTools.list_files")
+    def test_run_swarm_loop_env_injection_no_overwrite(self, mock_list_files, mock_console, mock_get_tools, mock_llm, mock_deps):
+        """测试环境信息注入不会覆盖已有的 tool_result"""
+        bus, todo = mock_deps
+        orch = SwarmOrchestrator(bus, todo)
+        
+        # 模拟 Coder 角色以便触发环境注入
+        mock_get_tools.return_value = [{"name": "read_file"}]
+        orch.handlers = {"read_file": lambda path: "file content"}
+        mock_list_files.return_value = "tree output"
+        todo.list_all.return_value = "task list"
+
+        # 第一回：调用 read_file
+        t_block = MagicMock()
+        t_block.type = "tool_use"
+        t_block.id = "c1"
+        t_block.name = "read_file"
+        t_block.input = {"path": "test.txt"}
+        mock_response = MagicMock(stop_reason="tool_use", content=[t_block])
+        
+        # 第二回：结束
+        mock_response_2 = MagicMock(stop_reason="end_turn", content=[MagicMock(type="text", text="done")])
+        mock_llm.side_effect = [mock_response, mock_response_2]
+
+        # 注入初始消息
+        orch.inject_user_message("Coder", "Read it")
+        orch.run_swarm_loop("Coder")
+
+        # 检查上下文
+        history = orch.agent_contexts["Coder"]
+        
+        # 找到包含 tool_result 的消息
+        tool_result_msg = next(m for m in history if isinstance(m.get("content"), list) and any(b.get("type") == "tool_result" for b in m["content"]))
+        
+        # 验证 tool_result 还在
+        assert any(b.get("type") == "tool_result" and "file content" in b.get("content") for b in tool_result_msg["content"])
+        # 验证 env info 也在
+        assert any(b.get("type") == "text" and "task list" in b.get("text") for b in tool_result_msg["content"])
+        assert any(b.get("type") == "text" and "tree output" in b.get("text") for b in tool_result_msg["content"])

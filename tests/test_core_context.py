@@ -1,5 +1,5 @@
 import pytest
-from production_agent.core.context import ContextManager
+from core.context import ContextManager
 
 def test_context_manager_microcompact():
     """测试微压缩：跳过图像，合并连续角色消息"""

@@ -73,14 +73,14 @@ class TestStdioMCPClient:
         return mock_proc
 
     @patch("select.select")
-    @patch("production_agent.tools.mcp_client.subprocess.Popen")
+    @patch("tools.mcp_client.subprocess.Popen")
     def test_initialization_sends_handshake(self, mock_popen, mock_select):
         """验证创建客户端时会发送 initialize 握手请求"""
         mock_select.return_value = ([MagicMock(fileno=lambda: 100)], [], [])
         mock_proc = self._make_smart_mock_process([{"protocolVersion": "2024-11-05"}])
         mock_popen.return_value = mock_proc
 
-        from production_agent.tools.mcp_client import StdioMCPClient
+        from tools.mcp_client import StdioMCPClient
         client = StdioMCPClient(name="test", command=["echo", "mock"])
 
         mock_popen.assert_called_once()
@@ -92,7 +92,7 @@ class TestStdioMCPClient:
         assert payload["method"] == "initialize"
 
     @patch("select.select")
-    @patch("production_agent.tools.mcp_client.subprocess.Popen")
+    @patch("tools.mcp_client.subprocess.Popen")
     def test_list_tools_parses_response(self, mock_popen, mock_select):
         """验证 list_tools() 正确解析 JSON-RPC 工具列表响应"""
         mock_select.return_value = ([MagicMock()], [], [])
@@ -105,7 +105,7 @@ class TestStdioMCPClient:
         mock_proc = self._make_smart_mock_process([{}, tools_result])
         mock_popen.return_value = mock_proc
 
-        from production_agent.tools.mcp_client import StdioMCPClient
+        from tools.mcp_client import StdioMCPClient
         client = StdioMCPClient(name="test", command=["echo"])
         tools = client.list_tools()
 
@@ -113,7 +113,7 @@ class TestStdioMCPClient:
         assert tools[0]["name"] == "read_file"
 
     @patch("select.select")
-    @patch("production_agent.tools.mcp_client.subprocess.Popen")
+    @patch("tools.mcp_client.subprocess.Popen")
     def test_call_tool_extracts_content_text(self, mock_popen, mock_select):
         """验证 call_tool() 正确提取 content block 中的文本"""
         mock_select.return_value = ([MagicMock()], [], [])
@@ -126,7 +126,7 @@ class TestStdioMCPClient:
         mock_proc = self._make_smart_mock_process([{}, call_result])
         mock_popen.return_value = mock_proc
 
-        from production_agent.tools.mcp_client import StdioMCPClient
+        from tools.mcp_client import StdioMCPClient
         client = StdioMCPClient(name="test", command=["echo"])
         result = client.call_tool("read_file", {"path": "/tmp/hello.txt"})
 
@@ -134,7 +134,7 @@ class TestStdioMCPClient:
         assert "Second block." in result
 
     @patch("select.select")
-    @patch("production_agent.tools.mcp_client.subprocess.Popen")
+    @patch("tools.mcp_client.subprocess.Popen")
     def test_call_tool_on_failure_returns_error_string(self, mock_popen, mock_select):
         """验证当子进程意外退出时，call_tool 返回错误字符串而非抛出异常"""
         mock_select.return_value = ([MagicMock()], [], [])
@@ -142,21 +142,21 @@ class TestStdioMCPClient:
         mock_proc = self._make_smart_mock_process([{}, None])
         mock_popen.return_value = mock_proc
 
-        from production_agent.tools.mcp_client import StdioMCPClient
+        from tools.mcp_client import StdioMCPClient
         client = StdioMCPClient(name="test", command=["echo"])
         result = client.call_tool("some_tool", {})
 
         assert "Error" in result or "failed" in result.lower()
 
     @patch("select.select")
-    @patch("production_agent.tools.mcp_client.subprocess.Popen")
+    @patch("tools.mcp_client.subprocess.Popen")
     def test_close_terminates_process(self, mock_popen, mock_select):
         """验证 close() 方法会终止子进程"""
         mock_select.return_value = ([MagicMock(fileno=lambda: 100)], [], [])
         mock_proc = self._make_smart_mock_process([{}])
         mock_popen.return_value = mock_proc
 
-        from production_agent.tools.mcp_client import StdioMCPClient
+        from tools.mcp_client import StdioMCPClient
         client = StdioMCPClient(name="test", command=["echo"])
         client.close()
 
@@ -167,7 +167,7 @@ class TestCreateMCPClient:
     """测试工厂函数 create_mcp_client()"""
 
     @patch("select.select")
-    @patch("production_agent.tools.mcp_client.subprocess.Popen")
+    @patch("tools.mcp_client.subprocess.Popen")
     def test_creates_stdio_client(self, mock_popen, mock_select):
         """验证 transport=stdio 创建 StdioMCPClient"""
         mock_select.return_value = ([MagicMock(fileno=lambda: 100)], [], [])
@@ -208,19 +208,19 @@ class TestCreateMCPClient:
         mock_proc.stdout.readline.side_effect = lambda: smart_read()
         mock_popen.return_value = mock_proc
 
-        from production_agent.tools.mcp_client import create_mcp_client, StdioMCPClient
+        from tools.mcp_client import create_mcp_client, StdioMCPClient
         client = create_mcp_client("fs", {"transport": "stdio", "command": ["echo"]})
         assert isinstance(client, StdioMCPClient)
 
     def test_unknown_transport_raises_error(self):
         """验证未知 transport 类型抛出 ValueError"""
-        from production_agent.tools.mcp_client import create_mcp_client
+        from tools.mcp_client import create_mcp_client
         with pytest.raises(ValueError, match="Unknown MCP transport"):
             create_mcp_client("bad", {"transport": "grpc"})
 
     def test_missing_command_raises_error(self):
         """验证 stdio 缺少 command 参数抛出 ValueError"""
-        from production_agent.tools.mcp_client import create_mcp_client
+        from tools.mcp_client import create_mcp_client
         with pytest.raises(ValueError, match="requires 'command'"):
             create_mcp_client("fs", {"transport": "stdio"})
 
@@ -230,7 +230,7 @@ class TestMCPRegistry:
 
     def setup_method(self):
         """重置 MCPRegistry 单例状态（保证测试间隔离）"""
-        from production_agent.tools.mcp_registry import MCPRegistry
+        from tools.mcp_registry import MCPRegistry
         # 彻底清除单例状态
         MCPRegistry._instance = None
         # 重新实例化会走 __new__ 并得到一个新的净空实例（如果实现支持或手动清空）
@@ -238,7 +238,7 @@ class TestMCPRegistry:
         self.registry._mcp_clients.clear()
         self.registry._mcp_schemas.clear()
         self.registry._initialized = False
-        import production_agent.tools.mcp_registry as mreg
+        import tools.mcp_registry as mreg
         mreg._tool_to_server.clear()
 
     def test_no_env_var_loads_nothing(self):
@@ -249,7 +249,7 @@ class TestMCPRegistry:
         assert self.registry.get_mcp_tools_schema() == []
         assert self.registry.get_mcp_handlers() == {}
 
-    @patch("production_agent.tools.mcp_registry.create_mcp_client")
+    @patch("tools.mcp_registry.create_mcp_client")
     def test_env_var_connects_servers(self, mock_create):
         """验证 MCP_SERVERS 环境变量中的服务器会被连接"""
         import os
@@ -272,7 +272,7 @@ class TestMCPRegistry:
         finally:
             os.environ.pop("MCP_SERVERS", None)
 
-    @patch("production_agent.tools.mcp_registry.create_mcp_client")
+    @patch("tools.mcp_registry.create_mcp_client")
     def test_handlers_route_to_correct_client(self, mock_create):
         """验证 Handler 会将调用路由到正确的 MCP 客户端"""
         import os

@@ -1,12 +1,12 @@
 import pytest
 import json
 from unittest.mock import MagicMock, patch
-from production_agent.managers.messages import MessageBus
+from managers.messages import MessageBus
 
 @pytest.fixture
 def mock_db(monkeypatch):
     mock_conn = MagicMock()
-    monkeypatch.setattr("production_agent.managers.messages.get_db_conn", lambda: mock_conn)
+    monkeypatch.setattr("managers.messages.get_db_conn", lambda: mock_conn)
     return mock_conn
 
 def test_message_bus_send(mock_db):

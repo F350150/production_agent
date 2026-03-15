@@ -30,12 +30,9 @@ class SystemTools:
         """
         logger.info(f"Tool run_bash: {command}")
         
-        # 安全拦截：包含危险命令时，直接强制挂起要求人类敲 Y 确认
+        # 安全拦截：包含危险命令时，直接记录警告（现在由 SwarmOrchestrator 在上层统一拦截）
         if any(cmd in command for cmd in DANGEROUS_COMMANDS):
-            print(f"\n\033[91m[HITL WARNING] Agent attempts to run a dangerous command: {command}\033[0m")
-            choice = input("\033[93mApprove execution? [y/N]: \033[0m").strip().lower()
-            if choice != 'y':
-                return "Command execution rejected by user."
+            logger.warning(f"Agent is running a potentially dangerous command: {command}")
                 
         try:
             res = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=60, cwd=str(WORKDIR))
@@ -75,12 +72,9 @@ class SystemTools:
         logger.info(f"Tool write_file: {path}")
         p = WORKDIR / path
         
-        # 对于已有文件进行全量覆盖时，如果不是在临时目录，强烈要求审核
+        # 对于已有文件进行全量覆盖时，如果不是在临时目录，记录警告（现在由 SwarmOrchestrator 在上层统一拦截）
         if p.exists() and "tmp" not in str(p):
-            print(f"\n\033[91m[HITL WARNING] Agent attempts to overwrite existing file: {path}\033[0m")
-            choice = input("\033[93mApprove overwrite? [y/N]: \033[0m").strip().lower()
-            if choice != 'y':
-                return "Write operation rejected by user."
+            logger.warning(f"Agent is overwriting existing file: {path}")
                 
         try:
             p.parent.mkdir(parents=True, exist_ok=True)
