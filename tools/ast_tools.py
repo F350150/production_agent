@@ -17,14 +17,32 @@ class ASTTools:
     
     @staticmethod
     def _parse_python(filepath: Path) -> str:
-        """基于官方 `ast` 库抽提类的框架与接口"""
+        """基于官方 `ast` 库抽提类的框架、继承关系与导入依赖"""
         try:
             source = filepath.read_text(encoding="utf-8")
             tree = ast.parse(source)
             out = []
+            
+            # 1. 提取导入关系
+            imports = []
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        imports.append(f"import {alias.name}")
+                elif isinstance(node, ast.ImportFrom):
+                    imports.append(f"from {node.module} import {', '.join(a.name for a in node.names)}")
+            
+            if imports:
+                out.append("=== IMPORTS ===")
+                out.extend(imports[:5]) # 仅展示前5个
+                out.append("")
+
+            # 2. 提取类与方法 (带继承)
             for node in ast.iter_child_nodes(tree):
                 if isinstance(node, ast.ClassDef):
-                    out.append(f"class {node.name}:")
+                    bases = [b.id for b in node.bases if isinstance(b, ast.Name)]
+                    inheritance = f" (inherits from: {', '.join(bases)})" if bases else ""
+                    out.append(f"class {node.name}{inheritance}:")
                     for n in node.body:
                         if isinstance(n, ast.FunctionDef):
                             args = [a.arg for a in n.args.args]
@@ -32,9 +50,25 @@ class ASTTools:
                 elif isinstance(node, ast.FunctionDef):
                     args = [a.arg for a in node.args.args]
                     out.append(f"def {node.name}({', '.join(args)}): ...")
+            
             return "\n".join(out)
         except Exception as e:
             return f"# Could not parse Python AST: {e}"
+
+    @staticmethod
+    def get_relational_context(source: str) -> str:
+        """从源代码字符串中提取精简的关系上下文 (用于 RAG 注入)"""
+        try:
+            tree = ast.parse(source)
+            bases = []
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ClassDef):
+                    bases.extend([b.id for b in node.bases if isinstance(b, ast.Name)])
+            if bases:
+                return f"[CONTEXT: Inherits from {', '.join(set(bases))}]\n"
+            return ""
+        except Exception:
+            return ""
 
     @staticmethod
     def _parse_cpp(filepath: Path) -> str:

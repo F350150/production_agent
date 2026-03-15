@@ -13,6 +13,8 @@ from core.swarm import SwarmOrchestrator, console
 from core import BUS, TODO, TEAM as team_manager
 from core.llm import MODEL_ID
 from managers.database import load_session, save_session, clear_session
+import streamlit.components.v1 as components
+import uuid
 from utils.paths import get_env_path
 
 # Load environment variables
@@ -45,9 +47,13 @@ st.markdown("""
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())[:8]
+
 if "swarm" not in st.session_state:
     swarm = SwarmOrchestrator(BUS, TODO, team_manager=team_manager, interrupt_checker=lambda: None)
-    history_dict = load_session("swarm_modular")
+    # 使用 session_id 加载持久化上下文
+    history_dict = load_session(f"swarm_{st.session_state.session_id}")
     if history_dict and isinstance(history_dict, dict):
         swarm.agent_contexts = history_dict
     st.session_state.swarm = swarm
@@ -59,13 +65,15 @@ if "current_role" not in st.session_state:
 with st.sidebar:
     st.title("🤖 Swarm UI")
     st.info(f"Model: {MODEL_ID}")
+    st.info(f"Session: {st.session_state.session_id}")
     st.caption("⚡ Powered by LangChain 1.0 + LangGraph")
     
     st.divider()
     
     if st.button("Clear Session", use_container_width=True):
-        clear_session("swarm_modular")
+        clear_session(f"swarm_{st.session_state.session_id}")
         st.session_state.messages = []
+        st.session_state.session_id = str(uuid.uuid4())[:8]
         st.session_state.swarm = SwarmOrchestrator(BUS, TODO, team_manager=team_manager, interrupt_checker=lambda: None)
         st.rerun()
 
@@ -83,16 +91,39 @@ with st.sidebar:
     else:
         st.warning("Tracing: DISABLED")
 
+def render_mermaid(mermaid_code: str):
+    """渲染 Mermaid 图表"""
+    html_code = f"""
+    <div class="mermaid">
+    {mermaid_code}
+    </div>
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({{ startOnLoad: true, theme: 'dark' }});
+    </script>
+    """
+    components.html(html_code, height=400, scrolling=True)
+
 # UI Header
 st.title("🚀 Production Agent")
 st.caption("Multi-Agent Autonomous Software Engineering Swarm — LangGraph Edition")
 
-# Display Chat History
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-        if "role_name" in message:
-            st.caption(f"Agent: {message['role_name']}")
+# Tabs
+tab_chat, tab_viz = st.tabs(["💬 Chat", "📊 Live Flow"])
+
+with tab_viz:
+    st.subheader("LangGraph Swarm Topology")
+    mermaid_graph = st.session_state.swarm.get_mermaid_graph()
+    render_mermaid(mermaid_graph)
+    st.caption("Tip: Nodes highlight the internal state machine flow.")
+
+with tab_chat:
+    # Display Chat History
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+            if "role_name" in message:
+                st.caption(f"Agent: {message['role_name']}")
 
 # Chat Input
 if prompt := st.chat_input("Input your project requirements..."):
@@ -117,7 +148,12 @@ if prompt := st.chat_input("Input your project requirements..."):
                 st.info(data)
 
         try:
-            final_role = swarm.run_swarm_loop(st.session_state.current_role, callback=swarm_callback)
+            # 传入 session_id 作为 thread_id
+            final_role = swarm.run_swarm_loop(
+                st.session_state.current_role, 
+                thread_id=st.session_state.session_id,
+                callback=swarm_callback
+            )
             st.session_state.current_role = final_role
             
             last_agent_messages = swarm.agent_contexts.get(final_role, [])
@@ -140,7 +176,7 @@ if prompt := st.chat_input("Input your project requirements..."):
                 with st.chat_message("assistant"):
                     st.markdown(full_response)
             
-            save_session("swarm_modular", swarm.agent_contexts)
+            save_session(f"swarm_{st.session_state.session_id}", swarm.agent_contexts)
             status.update(label="Workflow Complete", state="complete", expanded=False)
             
         except Exception as e:

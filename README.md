@@ -26,10 +26,12 @@
 本项目依托现代 AI 开发标准构建，是深入掌握以下技术的绝佳起点：
 
 - **LangChain 1.0**: 统一的 LLM 抽象层，集成了丰富的工具库与内存模型。
-- **LangGraph Swarm**: 使用 `StateGraph` 实现多角色编排。**PM -> Architect -> Coder -> QA** 的流转不再是硬编码，而是图计算。
-- **Model Context Protocol (MCP)**: 革命性的能力发现协议。Agent 可以在运行时动态“学会”使用本地数据库或外部 API。
-- **SQLite 异步持久化**: 集成 `AsyncSqliteSaver`，支持对话状态的长效保存与故障恢复，即刻拥有 production-ready 的记忆力。
-- **精细化安全审核 (HITL)**: 自研工具拦截逻辑，自动通过低风险操作，强制拦截高危执行（如 Bash 写入）。
+- **LangGraph Swarm**: 使用 `StateGraph` 实现多角色编排。支持 `summarizer` 节点自动压缩上下文，显著降低 Token 成本。
+- **自主错误修复 (Self-Healing)**: 内置 `diagnoser` 诊断节点。当工具执行报错时，Agent 会利用 LLM 自动分析错误原因并输出补救指令（如自动安装缺失依赖），实现故障自愈。
+- **稳健工具治理 (Tool Resilience)**: 针对生产环境设计的工具容灾机制。即使 Docker 沙盒未启动，系统也能平滑回退到本地执行并给出警报，确保核心流程不中断。
+- **关系感知 RAG (Graph RAG)**: 结合 Tree-sitter 语法树解析，在向量搜索基础上增加了类继承关系权重。
+- **LoRA 微调基础设施**: 内置轨迹收集器（Trajectory Collector），自动记录高质量对话并一键导出为 Alpaca 格式。支持通过 Unsloth 快速训练本地专家模型。
+- **SQLite 异步持久化**: 集成 `AsyncSqliteSaver`，支持会话状态的断点续传。
 
 ---
 
@@ -50,7 +52,7 @@
 
 ### 1. 基础要求
 - Python 3.10+
-- （可选）Docker Desktop：仅用于启用原生沙盒环境 `sandbox_bash` 功能。
+- （推荐）Docker Desktop：用于启用原生沙盒环境 `sandbox_bash` 功能。
 
 ### 2. 安装依赖库
 ```bash
@@ -58,18 +60,15 @@
 pip install langchain langchain-anthropic langgraph langgraph-checkpoint-sqlite aiosqlite python-dotenv rich nest_asyncio
 
 # 安装进阶感知功能（推荐）
-pip install playwright pyautogui mss beautifulsoup4 duckduckgo-search docker chromadb sentence-transformers
+pip install playwright pyautogui mss beautifulsoup4 duckduckgo-search docker chromadb sentence-transformers tree-sitter
 ```
-*(注：架构内部存在平滑降级机制，若未安装某项进阶库，相关的 Tool 会返回友好的警报让 Agent 指导您后续安装，**而不会让整个程序 Crash 罢工**。)*
+*(注：架构内部存在平滑降级机制。如果 Docker 未开启或某项依赖缺失，系统会优先尝试本地兜底或提示安装，**而不会让整个程序直接崩溃**。)*
 
 ### 3. 设置环境变量
 项目根目录下创建一个 `.env` 文件，填入你的大模型凭据：
 ```env
 # 核心通信密钥（必填）
 ANTHROPIC_AUTH_TOKEN=your_claude_api_key_here
-
-# 兼容第三方中转网关（可选）
-ANTHROPIC_BASE_URL=https://api.anthropic.com
 
 # 指定调用的模型版本（默认：claude-3-5-sonnet-20241022）
 MODEL_ID=claude-3-5-sonnet-20241022
@@ -83,31 +82,40 @@ MODEL_ID=claude-3-5-sonnet-20241022
 
 ### 1. 终端模式 (CLI Mode)
 ```bash
-python -m production_agent.main
+python main.py
 ```
 
 ### 2. 网页管理模式 (Web UI Mode)
 ```bash
-streamlit run production_agent/streamlit_app.py
+streamlit run streamlit_app.py
 ```
 
 ### 终端内连指令 (Built-in Commands)
-除了用自然语言对 Agent 下达例如 *“帮我用 React 写一个看板应用”* 或 *“查找一下目前代码里哪些地方涉及到了 login 函数，帮我加一下异常拦截日志”* 等指令外，你还能使用以下系统级热键：
+除了用自然语言对 Agent 下达指令外，你还能使用以下系统级热键：
 
-- **`/cost`** —— 💳 打印目前的财务监控报表，查看在这台电脑上累计跑了多少 Input/Output Token，以及折合消耗了多少美元。
-- **`/compact`** —— 🗜️ 告一段落后手动触发压缩机制。系统会将上文几千轮的历史扔给模型总结出一份几百字的摘要以重置 Context，极大降低你后续每一句话的请求延迟与金钱成本。
-- **`/clear`** —— 🗑️ 抹除 `default_modular` Session 的脑容量，彻底开始崭新的工作。
-- **`q` 或 `exit`** —— 🛑 安全中止运行，并落盘所有的对话状态，供下次执行断点续传。
+- **`/cost`** —— 💳 打印目前的 token 消耗报表与美元成本估计。
+- **`/history`** —— 📜 查看本次会话的输入指令历史。
+- **`/clear`** —— 🗑️ 抹除当前 Session 的缓存状态。
+- **`q` 或 `exit`** —— 🛑 安全中止运行并落盘状态。
 
 ---
 
 ## 📝 更新日志 (Changelog)
 
-### [2026-03-15] - Phase 5 Observability & Web UI
-- **[新内核能力]**: `SwarmOrchestrator` 支持实时事件回调 (Callback Mechanism)，解耦引擎与 UI 展现。
-- **[链路追踪]**: 集成 LangSmith 探针，由底层 `core/llm.py` 自动捕捉所有推理链路与 Token 成本。
-- **[可视化前台]**: 新增基于 Streamlit 的 Web 用户界面 (`streamlit_app.py`)，支持实时观察多智能体节点流转。
-- **[文档补全]**: 新增可观测性与 Web UI 专用技术指南。
+### [2026-03-15] - Phase 7: LoRA Fine-Tuning Integration
+- **[轨迹收集]**: 新增 `TrajectoryCollector` 模块，自动捕获每一轮对话轨迹用于模型持续进化。
+- **[微调脚本]**: 提供 `train_lora.py` 标准模版，支持在消费级显卡上快速微调 Llama/Qwen 等专家模型。
+- **[多后端架构]**: `core/llm.py` 现在支持动态加载 LoRA 适配器，并能在云端与本地模型间无缝切换。
+
+### [2026-03-15] - Phase 6: Tool Resilience & Stability
+- **[弹性自愈]**: 完善了 `diagnoser` 节点逻辑，支持自动分析 stderr 并尝试补救措施。
+- **[工具防崩溃]**: `run_bash` 现在能自动感知 Docker 环境。若未开启，会自动执行“本地紧急回退”方案并给用户报警。
+- **[智能路径补全]**: `read_file` 增加了对目录的识别。当 Agent 对目录执行读取时，会自动提示“请使用 `list_files`”。
+- **[关系感知 RAG]**: 正式合并 `ASTTools` 与 `RAGTools` 的联动逻辑，现在 RAG 搜索结果包含代码继承关系。
+
+### [2026-03-15] - Phase 5: Observability & Web UI
+- **[新内核能力]**: `SwarmOrchestrator` 支持实时事件回调，解耦引擎与 UI。
+- **[可视化前台]**: 新增基于 Streamlit 的可视化界面，实时展示 LangGraph 节点流转。
 
 ---
 

@@ -1,0 +1,47 @@
+# Tool Governance & RBAC Configuration
+
+# List of tools that require Human-In-The-Loop (HITL) approval regardless of role
+# These tools will trigger an interrupt in the graph if a user approval mechanism is set.
+dangerous_tools:
+  - run_bash
+  - write_file
+  - edit_file
+  - delete_file
+  - sandbox_bash
+
+# Role-Based Access Control (RBAC)
+# Define which roles can access which categories of tools.
+# If a role is not listed here, it gets 'base_tools' only.
+role_permissions:
+  ProductManager:
+    - base_tools
+    - web_search
+    - fetch_url
+  Architect:
+    - base_tools
+    - read_file
+    - web_search
+  Coder:
+    - base_tools
+    - read_file
+    - write_file
+    - edit_file
+    - run_bash
+    - sandbox_bash
+  QA_Reviewer:
+    - base_tools
+    - read_file
+    - run_bash
+    - sandbox_bash
+    - web_search
+
+# Sandbox Enforcement Settings
+sandbox_settings:
+  # If true, tools like run_bash and edit_file will be forced into Docker
+  force_docker_sandbox: true
+  # Map tools to their sandboxed versions (internal logic)
+  sandboxed_tools:
+    run_bash: sandbox_bash
+    # edit_file: sandbox_edit (to be implemented)
+  # Default image for sandboxing
+  default_image: "python:3.11-slim"

@@ -14,9 +14,13 @@ from typing import Optional, List
 from dotenv import load_dotenv
 
 from langchain_anthropic import ChatAnthropic
+try:
+    from langchain_openai import ChatOpenAI
+except ImportError:
+    ChatOpenAI = None
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
-from langchain_core.tools import BaseTool
+from langchain_core.language_models.chat_models import BaseChatModel
 
 from utils.paths import get_env_path
 from managers.database import record_token_usage
@@ -30,22 +34,24 @@ if env_path:
 else:
     load_dotenv()
 
+# Cloud 配置 (Anthropic)
 API_KEY = os.getenv("ANTHROPIC_API_KEY")
 BASE_URL = os.getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
-MODEL_ID = os.getenv("MODEL_ID", "claude-sonnet-4-20250514")
+MODEL_ID = os.getenv("MODEL_ID", "claude-3-5-sonnet-20241022")
 
-if not API_KEY:
-    print("\033[91mError: ANTHROPIC_API_KEY is not set in environment or .env file.\033[0m")
+# Local 配置 (vLLM / Ollama / LoRA)
+USE_LOCAL_LLM = os.getenv("USE_LOCAL_LLM", "false").lower() == "true"
+LOCAL_BASE_URL = os.getenv("LOCAL_BASE_URL", "http://localhost:8000/v1")
+LOCAL_MODEL_ID = os.getenv("LOCAL_MODEL_ID", "qwen-7b-lora")
+LORA_ADAPTER_PATH = os.getenv("LORA_ADAPTER_PATH", "")
+
+if not USE_LOCAL_LLM and not API_KEY:
+    print("\033[91mError: ANTHROPIC_API_KEY is not set. To use local models, set USE_LOCAL_LLM=true.\033[0m")
 
 
 class TokenCounterCallback(BaseCallbackHandler):
     """
     Token 用量追踪回调 (Token Counter Callback)
-
-    【设计意图】
-    LangChain 1.0 通过 Callback 机制在 LLM 响应完成后自动获取 Token 消耗信息。
-    我们将每一次调用的 Input/Output Token 持久化到 SQLite 的 metrics 表中，
-    与原来手写的 record_token_usage 保持完全兼容。
     """
     def on_llm_end(self, response, **kwargs):
         """LLM 调用结束时记录 Token 用量"""
@@ -64,18 +70,30 @@ class TokenCounterCallback(BaseCallbackHandler):
 token_counter = TokenCounterCallback()
 
 
-def get_llm(streaming: bool = False) -> ChatAnthropic:
+def get_llm(streaming: bool = False) -> BaseChatModel:
     """
-    获取标准化的 ChatAnthropic 实例
+    获取标准化的 LLM 实例 (支持云端与本地)
 
     【设计意图】
-    统一的 LLM 工厂函数。所有组件（Agent、Swarm、Subagent）都通过此函数获取 LLM，
-    确保配置一致性。LangSmith 追踪在 LangChain 1.0 中是自动开启的（只要设置了环境变量），
-    无需手动添加 @traceable 装饰器。
-
-    参数：
-    - streaming: 是否启用流式输出
+    1. 默认使用 Anthropic 云端模型以保证稳定性。
+    2. 若开启 USE_LOCAL_LLM，则通过 ChatOpenAI 接口连接本地服务 (vLLM 或 Ollama)。
+    3. 本地模式支持通过 LORA_ADAPTER_PATH 指定微调后的模型。
     """
+    if USE_LOCAL_LLM:
+        if ChatOpenAI is None:
+            raise ImportError("USE_LOCAL_LLM is true but 'langchain-openai' is not installed. Please run 'pip install langchain-openai'.")
+        # 使用本地兼容 OpenAI 的后端 (vLLM / Ollama)
+        logger.info(f"Using Local LLM at {LOCAL_BASE_URL} with model {LOCAL_MODEL_ID}")
+        return ChatOpenAI(
+            model=LOCAL_MODEL_ID,
+            openai_api_key="local-placeholder",
+            openai_api_base=LOCAL_BASE_URL,
+            max_tokens=8192,
+            streaming=streaming,
+            callbacks=[token_counter],
+        )
+
+    # 默认路径：Anthropic Cloud
     if not API_KEY:
         raise RuntimeError("API client not initialized. Check your ANTHROPIC_API_KEY.")
 
@@ -87,15 +105,12 @@ def get_llm(streaming: bool = False) -> ChatAnthropic:
         "callbacks": [token_counter],
     }
 
-    # 兼容第三方中转网关
     if BASE_URL and BASE_URL != "https://api.anthropic.com":
         kwargs["base_url"] = BASE_URL
 
     return ChatAnthropic(**kwargs)
 
 
-# 预构建的全局实例（供快速访问）
-# 非流式版本（用于后台 Agent、Subagent、压缩等）
+# 预构建的全局实例
 llm = get_llm(streaming=False)
-# 流式版本（用于终端交互的实时打字机效果）
 llm_streaming = get_llm(streaming=True)

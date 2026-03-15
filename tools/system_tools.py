@@ -56,6 +56,8 @@ class SystemTools:
         """从工作区读取绝对或相对路径的内容"""
         logger.info(f"Tool read_file: {path}")
         p = WORKDIR / path
+        if p.is_dir():
+            return f"Note: {path} is a directory. To list its contents, use the `list_files` tool. To read a specific file, provide its path."
         if not p.is_file():
             return f"Error: File {path} does not exist."
         try:

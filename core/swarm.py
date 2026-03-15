@@ -12,135 +12,144 @@ core/swarm.py - 多智能体图灵拓扑编排引擎 (LangChain 1.0 / LangGraph 
 """
 
 import logging
-import json
-from typing import Optional, Callable
+import asyncio
+from typing import Optional, List, Dict, TypedDict, Any, Literal, Callable
 from rich.console import Console
 
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage, RemoveMessage
 from langgraph.prebuilt import create_react_agent
-from langgraph_swarm import create_handoff_tool, create_swarm
+from langgraph_swarm import create_handoff_tool, create_swarm, SwarmState as BaseSwarmState
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, RemoveMessage
+from langgraph.graph import START, StateGraph
 from core.llm import get_llm
 from utils.paths import DB_PATH
+from utils.converters import serialize_message_content
 import aiosqlite
-from tools.registry import ToolRegistry, create_task_tools
+from tools.registry import ToolRegistry, create_task_tools, GOVERNANCE
+from core.prompts import prompt_manager
+from managers.collector import collector
 
 console = Console()
 logger = logging.getLogger(__name__)
 
 
 # ==============================================================================
-# 角色 System Prompt 定义（原样迁移自旧版 swarm.py）
+# 状态与类型定义 (State & Types)
 # ==============================================================================
 
-BASE_PROMPT = (
-    "You are a cutting-edge Autonomous Principal Agent operating in a multi-agent swarm.\n\n"
-    "=== SYSTEM KNOWLEDGE ===\n"
-    "- Dynamic Tools: Any tool starting with 'mcp__' is an external capability discovered via Model Context Protocol.\n"
-    "- Multi-Agent: You are part of a swarm. Use handoff tools to pass the baton when your specialty is exhausted.\n"
-    "- Context Isolation: Each agent has their own conversation history. Handover summaries are preserved.\n"
-    "- Task Tracking: Always maintain tasks using task_create, task_update, task_list tools.\n"
-)
+class MessageDict(TypedDict):
+    """单条消息的字典表示"""
+    role: str
+    content: str
+    metadata: Optional[Dict[str, Any]]
 
-ROLE_PROMPTS = {
-    "ProductManager": BASE_PROMPT + """
-=== ROLE: Product Manager ===
+class SwarmState(BaseSwarmState):
+    """
+    扩展状态：增加总结字段和错误计数。
+    """
+    summary: Optional[str] = None
+    task_id: Optional[int] = None
+    last_handoff_message: Optional[str] = None
+    error_count: int = 0  # 记录连续错误次数，防止死循环
 
-【核心职责】
-你负责需求澄清、产品规划和工作流协调。你代表用户与系统之间的第一道沟通桥梁。
-你是智能路由器——根据用户需求的复杂度，选择最高效的处理路径。
 
-【快速路由规则 — 必须严格遵守】
-收到用户消息后，立即判断复杂度：
+async def summarize_history(state: SwarmState):
+    """
+    自动摘要节点 (Summarization Node)
+    """
+    messages = state.get("messages", [])
+    summary = state.get("summary", "")
 
-🟢 简单操作型请求（如：列出目录、读文件、运行命令、查看代码）：
-   → 不要废话，不要解释你的局限性，不要创建任务列表
-   → 直接调用 transfer_to_coder，简要说明用户要做什么
+    # 阈值判断：消息数 > 25 或 总字符数 > 20,000
+    if len(messages) < 25 and len(str(messages)) < 20000:
+        return {}
 
-🔵 信息检索型请求（如：查新闻、搜 API 文档、研究背景）：
-   → 直接使用 web_search 或 fetch_url 工具完成
-   → 整理好输出直接回给用户或移交给相关同事
+    logger.info(f"Summarization triggered: {len(messages)} messages.")
+    
+    # 1. 提取需要总结的部分（保留最后的 3 条互动）
+    to_summarize = messages[:-3]
+    recent_messages = messages[-3:]
 
-🟡 中等复杂请求（如：修改某个现有功能、修复 bug、添加简单特性）：
-   → 简要分析需求 → 直接 transfer_to_coder，附带清晰指令
+    # 2. 调用 LLM 生成摘要
+    summarize_llm = get_llm(streaming=False)
+    
+    # 构建总结提示词
+    summary_history_str = "\n".join([f"{m.type}: {m.content}" for m in to_summarize])
+    prompt = (
+        f"You are a context manager. Below is a long conversation history.\n"
+        f"Existing Summary: {summary or 'None'}\n\n"
+        f"NEW CONVERSATION TO ADD:\n{summary_history_str}\n\n"
+        f"Please provide a new, updated summary that captures all key decisions, "
+        f"task progress, and technical designs. Be concise but thorough."
+    )
+    
+    response = await summarize_llm.ainvoke([HumanMessage(content=prompt)])
+    new_summary = response.content
 
-🔴 复杂产品级需求（如：设计新系统、重构架构、多模块联动开发）：
-   → 完整 PRD 流程 → 任务拆解 → transfer_to_architect
+    # 3. 构造消息列表压缩指令
+    # 使用 RemoveMessage 删除旧消息
+    delete_ops = [RemoveMessage(id=m.id) for m in to_summarize if hasattr(m, 'id')]
+    
+    # 使用 HumanMessage 包装摘要，防止某些模型报错 "multiple non-consecutive system messages"
+    summary_msg = HumanMessage(
+        content=f"[SYSTEM NOTIFICATION: CONTEXT SUMMARY]\n{new_summary}\n[END SUMMARY]"
+    )
 
-【决策流程（仅针对 🔴 级别）】
-1. 需求分析：理解用户的模糊需求，必要时通过 web_search 研究背景信息
-2. 需求澄清：如果需求不明确，主动向用户提出问题
-3. 任务拆解：将大需求拆解为可执行的任务列表（使用 task_create）
-4. PRD 起草：输出结构化的产品需求文档
+    # 返回更新：这里 messages 的 reducer (add_messages) 会处理 RemoveMessage
+    # 额外处理：确保消息列表中只有一个 SystemMessage (最前面的保留，后面的删除)
+    final_messages = delete_ops + [summary_msg] + recent_messages
+    
+    return {
+        "summary": new_summary,
+        "messages": final_messages
+    }
 
-【移交时机】
-- 🟢🟡 级别：立即 transfer_to_coder
-- 🔴 级别：PRD 完成后 transfer_to_architect
 
-【★ 最重要的一条规则 ★】
-永远不要向用户说"我没有这个工具"或"我无法直接操作"。
-你有队友！立即 handoff 给能做这件事的队友。用户不关心内部分工细节。
-""",
+async def diagnose_error(state: SwarmState):
+    """
+    自主错误修复节点 (Error Repair Node)
+    
+    【核心逻辑】
+    当检测到工具执行报错（如 stderr, ModuleNotFoundError）时触发。
+    利用 LLM 分析错误原因并建议补救措施。
+    """
+    messages = state.get("messages", [])
+    error_count = state.get("error_count", 0)
+    
+    if error_count > 3:
+        return {"messages": [AIMessage(content="Self-healing failed after 3 attempts. Please check manually.")]}
+        
+    # 提取错误上下文
+    last_tool_msg = next((m for m in reversed(messages) if m.type == "tool"), None)
+    if not last_tool_msg:
+        return {"error_count": error_count + 1}
+        
+    error_text = str(last_tool_msg.content)
+    logger.warning(f"Self-healing triggered for error: {error_text[:100]}...")
 
-    "Architect": BASE_PROMPT + """
-=== ROLE: Architect ===
+    llm = get_llm(streaming=False)
+    repair_prompt = (
+        f"The agent encountered an error while executing a tool:\n\n"
+        f"ERROR: {error_text}\n\n"
+        f"Please analyze this error. If it's a missing dependency, environment issue, or syntax error, "
+        f"provide a specific bash command to fix it (e.g., 'pip install ...' or 'mkdir ...').\n"
+        f"Only provide the command if you are confident. Otherwise, explain the cause briefly."
+    )
+    
+    response = await llm.ainvoke([HumanMessage(content=repair_prompt)])
+    
+    repair_msg = AIMessage(
+        content=f"[SELF-HEALING DIAGNOSIS]\n{response.content}\n[END DIAGNOSIS]"
+    )
+    
+    return {
+        "messages": [repair_msg],
+        "error_count": error_count + 1
+    }
 
-【核心职责】
-你负责系统架构设计、技术选型和实现路径规划。你从 PRD 出发，产出可落地的技术方案。
 
-【决策流程】
-1. 需求理解：仔细阅读 ProductManager 提供的 PRD
-2. 现状扫描：使用 get_repo_map 了解现有代码结构
-3. 依赖分析：通过 index_codebase 和 semantic_search_code 找到相关模块
-4. 方案设计：制定详细的架构方案
-
-【审批机制】
-完成架构方案后，使用 transfer_to_productmanager 提交审批。
-获批后，使用 transfer_to_coder 移交。
-
-【注意事项】
-- 保持方案的可实施性，避免过度设计
-- 考虑现有代码的扩展性
-""",
-
-    "Coder": BASE_PROMPT + """
-=== ROLE: Coder ===
-
-【核心职责】
-你负责代码实现、调试和修改。你严格按照 Architect 提供的方案编写高质量代码。
-
-【决策流程】
-1. 方案理解：阅读 Architect 提供的架构方案
-2. 代码实现：使用 read_file, edit_file, write_file, run_bash
-3. 进度更新：频繁使用 task_update 更新任务状态
-
-【移交时机】
-当所有任务完成且代码可运行时，使用 transfer_to_qa_reviewer 移交。
-
-【注意事项】
-- 不要偏离 Architect 的设计方案
-- 实现遇到困难时，使用 transfer_to_architect 寻求指导
-""",
-
-    "QA_Reviewer": BASE_PROMPT + """
-=== ROLE: QA Reviewer ===
-
-【核心职责】
-你负责代码审查、功能测试和质量保证。你是系统上线前的最后一道防线。
-现在你还配备了实时信息检索能力。
-
-【决策流程】
-1. 需求背景：如果你不了解当前的系统、环境或最新的外部背景（如新闻、文档、API版本），请先使用 web_search 或 fetch_url 进行研究。
-2. 代码审查：使用 read_file 查看修改的代码
-3. 功能测试：使用 run_bash 或 sandbox_bash 执行测试
-4. 质量评估：检查性能、安全性、代码风格
-5. 解决问题：如果遇到环境问题（如 400 错误、库缺失），尝试使用搜索寻找解决方案。不要仅仅报告失败。
-
-【移交机制】
-- 通过测试：直接向用户回复交付清单（不再移交）
-- 测试失败：使用 transfer_to_coder 附上详细问题报告
-""",
-}
+# System Prompts are now managed in core/prompts.py via PromptManager
 
 
 # ==============================================================================
@@ -199,33 +208,136 @@ class SwarmOrchestrator:
                     create_handoff_tool(agent_name=target)
                 )
 
+            # 获取角色动态提示词
+            prompt = prompt_manager.get_prompt(role)
+
             # 创建角色 Agent
             agent = create_react_agent(
                 llm,
                 role_tools,
-                prompt=ROLE_PROMPTS.get(role, BASE_PROMPT),
+                prompt=prompt,
                 name=role,
             )
             agents.append(agent)
 
-        # 创建 Swarm 编排图, 这里的 "interrupt_before" 就是人类在环(HITL)审批的关键参数
-        # 当流转到 QA_Reviewer 时自动挂起，等待用户 approval。
-        return create_swarm(agents, default_active_agent="ProductManager")
+        # --- 手动构建图 (使用扩展的 SwarmState) ---
+        builder = StateGraph(SwarmState)
+
+        # 核心增强：所有的入口都先经过 summarizer
+        builder.add_node("summarizer", summarize_history)
+        builder.set_entry_point("summarizer")
+
+        # 3. 添加角色节点 (带消息清理包装)
+        def agent_node_wrapper(agent_runnable):
+            async def _n(state: SwarmState):
+                # 关键修复：Anthropic 不允许非连续或多个系统消息
+                # 我们移除历史中所有的 SystemMessage。
+                # 由于 create_react_agent 内部会重新注入其初始 prompt (通常为 SystemMessage)，
+                # 这样就保证了消息序列中始终只有一个、且是最新的 SystemMessage。
+                messages = state.get("messages", [])
+                filtered_messages = [m for m in messages if not isinstance(m, SystemMessage)]
+                
+                # 额外保护：如果 messages 为空（理论不应），赋予一个初始消息
+                if not filtered_messages and "active_agent" in state:
+                    # 避免空列表进入 React Agent
+                    pass 
+
+                return await agent_runnable.ainvoke({**state, "messages": filtered_messages})
+            return _n
+
+        for role, agent in zip(role_names, agents):
+            builder.add_node(role, agent_node_wrapper(agent))
+
+        # 4. 添加错误诊断节点
+        builder.add_node("diagnoser", diagnose_error)
+        
+        # 5. 定义路由逻辑
+        
+        # --- 路由 1: 汇总节点后的路由 ---
+        def summarizer_router(state: SwarmState) -> str:
+            return state.get("active_agent", "ProductManager")
+        
+        builder.add_conditional_edges("summarizer", summarizer_router, path_map=role_names)
+
+        # --- 路由 2: Agent 节点后的路由 (核心：自愈、移交与结束控制) ---
+        from langgraph.graph import END
+        def agent_router(state: SwarmState):
+            messages = state.get("messages", [])
+            if not messages:
+                return END
+            
+            last_msg = messages[-1]
+            
+            # 1. 检测工具执行错误 -> 进入诊断自愈
+            content_str = str(last_msg.content).lower()
+            if last_msg.type == "tool" and ("error:" in content_str or "stderr" in content_str or "failed" in content_str or "not found" in content_str):
+                return "diagnoser"
+            
+            # 2. 检测接力棒移交 (handoff)
+            # langgraph-swarm 的 handoff 工具会产生一个带 artifact 的 AIMessage
+            # 也会更新 state["active_agent"]。
+            # 如果 last_msg 是 AIMessage 且包含 tool_calls 指向 handoff 工具，
+            # 说明它想移交。我们需要去 summarizer 记录这一行为并路由。
+            if isinstance(last_msg, AIMessage) and last_msg.tool_calls:
+                # 检查是否是 handoff 调用
+                if any(tc.get("name", "").startswith("transfer_to_") for tc in last_msg.tool_calls):
+                    return "summarizer"
+                # 如果有其他工具调用，说明还没完，继续让 agent 跑工具 (LangGraph 会处理这些)
+                # 注意：这里如果返回 END 会导致中断，所以需要谨慎
+            
+            # 3. 如果是普通文本回复 -> 结束流程并返回给用户
+            # 在单智能体 ReAct loop 结束后，如果最后是 AIMessage 且没有 tool_calls，即为最终答复。
+            if isinstance(last_msg, AIMessage) and not last_msg.tool_calls:
+                return END
+            
+            # 默认兜底：回 summarizer 检查
+            return "summarizer"
+
+        for role in role_names:
+            builder.add_conditional_edges(
+                role, 
+                agent_router, 
+                {"diagnoser": "diagnoser", "summarizer": "summarizer", END: END}
+            )
+        
+        # 诊断完成后回主流程
+        builder.add_edge("diagnoser", "summarizer")
+        
+        return builder
+
+    def get_mermaid_graph(self):
+        """
+        导出当前的 Mermaid 拓扑图，用于 UI 可视化
+        """
+        try:
+            # 编译一个临时 application 来生成图
+            app = self._app_uncompiled.compile()
+            return app.get_graph().draw_mermaid()
+        except Exception as e:
+            return f"Error generating graph: {e}"
 
     def inject_user_message(self, role: str, message: str):
         """
-        外部用户向系统注入需求的第一入口
-
-        【兼容旧版 API】
-        保持与 main.py 和 streamlit_app.py 的接口一致
+        向 Swarm 注入用户指令
         """
-        self.current_role = role
-        # agent_contexts 用于 session 持久化的兼容
+        # 1. 发送到 inbox (持久化)
+        self.bus.send(
+            sender="User",
+            recipient=role,
+            content=message,
+            msg_type="message"
+        )
+        
+        # 2. 同步到内存上下文 (实时执行需要)
         if role not in self.agent_contexts:
             self.agent_contexts[role] = []
-        self.agent_contexts[role].append({"role": "user", "content": message})
+        
+        self.agent_contexts[role].append({
+            "role": "user",
+            "content": message
+        })
 
-    async def run_swarm_loop(self, starting_role: str = "ProductManager", callback: Callable = None):
+    async def run_swarm_loop(self, starting_role: str = "ProductManager", thread_id: str = "swarm_main", callback: Callable = None):
         """
         执行 Swarm 编排循环 (异步版本)
 
@@ -251,7 +363,7 @@ class SwarmOrchestrator:
         # 构建 LangGraph 输入
         input_msg = {"messages": [HumanMessage(content=content)]}
         config = {
-            "configurable": {"thread_id": "swarm_main"},
+            "configurable": {"thread_id": thread_id},
             "recursion_limit": 50,  # 替代原来的熔断器
         }
 
@@ -324,11 +436,12 @@ class SwarmOrchestrator:
                     tool_names = []
                     
                     if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
-                        DANGEROUS_TOOLS = ["run_bash", "write_file", "edit_file", "sandbox_bash"]
+                        # 从治理配置读取危险工具列表
+                        dangerous_list = GOVERNANCE.get("dangerous_tools", ["run_bash", "write_file", "edit_file", "sandbox_bash"])
                         for tc in last_msg.tool_calls:
                             t_name = tc.get("name", "")
                             tool_names.append(t_name)
-                            if t_name in DANGEROUS_TOOLS:
+                            if t_name in dangerous_list:
                                 is_dangerous = True
                     
                     if is_dangerous:
@@ -382,6 +495,17 @@ class SwarmOrchestrator:
                                 "content": msg.content
                             })
                             break
+                    
+                    # Record trajectory for LoRA fine-tuning
+                    if final_messages:
+                        try:
+                            collector.record_session(
+                                session_id=thread_id,
+                                messages=final_messages,
+                                metadata={"final_role": final_role}
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to record trajectory: {e}")
 
             self.current_role = final_role
             if callback:

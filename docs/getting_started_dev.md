@@ -11,17 +11,19 @@
 - **Node.js (LTS)**：由于本项目依赖 MCP 实现在本地访问文件系统和执行 Web 检索，你需要安装 `npx` (Node 包运行器)。
 
 ### 2. 工程化初始化
-克隆代码库后，建议通过以下方式安装，以启用“开发模式（Editable Mode）”：
+克隆代码库后，建议通过以下方式安装：
 ```bash
-# 进入项目根目录
+# 1. 安装核心依赖
 pip install -e .
 
-# 安装 Web UI 与 观测链路依赖
-pip install streamlit langsmith
+# 2. 安装高级感知与 RAG 依赖 (推荐)
+pip install docker chromadb tree-sitter playwright duckduckgo-search
 ```
 
 ### 3. 配置秘密文件 (.env)
-复制样板并填入大模型凭据。注意：如果你使用的是兼容 OpenAI/Anthropic 协议的网关（如智谱 AI、OpenRouter），请务必正确配置 `ANTHROPIC_BASE_URL`。
+复制样板并填入大模型凭据。
+-   **MODEL_ID**: 建议使用 `claude-3-5-sonnet-20241022` 或更高性能模型以保证 Swarm 逻辑稳定。
+-   **Docker 说明**：非强制。若未启动 Docker，系统会自动执行本地回退逻辑并报警。
 
 ---
 

@@ -1,48 +1,31 @@
 import logging
-import time
 import asyncio
-from managers.database import get_db_conn, DB_LOCK
+from typing import List, Optional, Dict, Any, TypedDict, Literal
+from managers.database import get_db_conn, DB_LOCK, record_token_usage
+from utils.paths import DB_PATH
+from utils.converters import serialize_message_content
+from langgraph.graph import MessagesState, StateGraph
+from langgraph.prebuilt import create_react_agent
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langchain_core.messages import HumanMessage
 
 logger = logging.getLogger(__name__)
 
 
-def _serialize_content(content):
-    """
-    将 Anthropic SDK 返回的 content 列表序列化为普通 dict
-    （从 core/swarm.py 移动过来，避免循环导入）
-    """
-    if isinstance(content, str):
-        return content
-    if not isinstance(content, list):
-        return str(content)
-    serialized = []
-    for block in content:
-        if isinstance(block, dict):
-            serialized.append(block)
-        elif hasattr(block, "type"):
-            if block.type == "text":
-                serialized.append({"type": "text", "text": getattr(block, "text", "")})
-            elif block.type == "tool_use":
-                serialized.append({
-                    "type": "tool_use",
-                    "id": getattr(block, "id", ""),
-                    "name": getattr(block, "name", ""),
-                    "input": getattr(block, "input", {})
-                })
-            elif block.type == "tool_result":
-                serialized.append({
-                    "type": "tool_result",
-                    "tool_use_id": getattr(block, "tool_use_id", ""),
-                    "content": getattr(block, "content", "")
-                })
-            else:
-                try:
-                    serialized.append(block.model_dump())
-                except Exception:
-                    serialized.append({"type": "text", "text": str(block)})
-        else:
-            serialized.append({"type": "text", "text": str(block)})
-    return serialized
+# ==============================================================================
+# 类型定义 (Types)
+# ==============================================================================
+
+class TeammateInfo(TypedDict):
+    """队友信息字典"""
+    name: str
+    role: str
+    status: Literal["idle", "working", "error"]
+    last_task: Optional[str]
+
+# ==============================================================================
+# 工具函数 (Utilities)
+# ==============================================================================
 
 class TeammateManager:
     """
@@ -89,70 +72,62 @@ class TeammateManager:
 
         return role_prompts.get(role, base + f"ROLE: {role}. Execute your assigned task efficiently.")
 
-    async def _run_teammate_agent(self, name: str, role: str, prompt: str, max_rounds: int = 10):
+    async def _run_teammate_agent(self, name: str, role: str, prompt: str, max_rounds: int = 15):
         """
-        【后台 Agent 执行核心】在 asyncio 任务中运行的子 Agent
-
-        参数：
-        - name: Agent 唯一标识
-        - role: Agent 角色（Explore, Research, Test 等）
-        - prompt: 初始任务提示
-        - max_rounds: 最大对话轮次，防止无限循环
+        【后台 Agent 执行核心】基于 LangGraph 的子图执行模式
         """
         from core.llm import get_llm
-        from langgraph.prebuilt import create_react_agent
-        from langchain_core.messages import HumanMessage
         
         try:
-            # 获取角色专用工具集
+            # 1. 初始化工具与模型
             tools = self._get_tools_for_role(role)
             sys_prompt = self._get_system_prompt_for_role(role)
-            
-            # 使用 LangGraph 的 prebuilt agent 初始化子 Agent
             llm = get_llm(streaming=False)
+            
+            # 2. 创建 React Sub-Graph
             agent = create_react_agent(llm, tools, prompt=sys_prompt)
-
-            logger.info(f"Teammate {name} started processing: {prompt[:50]}...")
             
-            # 调用执行（非流式，后台静默执行）
-            response = await agent.ainvoke(
-                {"messages": [HumanMessage(content=prompt)]},
-                config={"recursion_limit": max_rounds}
-            )
+            # 3. 使用全局 SQLite Checkpointer 进行持久化
+            async with AsyncSqliteSaver.from_conn_string(str(DB_PATH)) as checkpointer:
+                config = {
+                    "configurable": {"thread_id": f"teammate_{name}"},
+                    "recursion_limit": max_rounds
+                }
+                
+                # 执行任务
+                logger.info(f"Teammate {name} ({role}) executing in LangGraph...")
+                input_msg = {"messages": [HumanMessage(content=prompt)]}
+                
+                # ainvoke 会自动处理 checkpointing
+                state = await agent.ainvoke(input_msg, config=config)
+                
+                # 4. 提取结果
+                final_messages = state.get("messages", [])
+                final_text = "No output."
+                if final_messages:
+                    last_msg = final_messages[-1]
+                    if hasattr(last_msg, "content"):
+                        final_text = str(last_msg.content)
 
-            # 抓取最后一条 AI 回复作为任务完成报告
-            final_messages = response.get("messages", [])
-            final_text = "Task completed with no text output."
-            if final_messages:
-                last_msg = final_messages[-1]
-                if hasattr(last_msg, "content"):
-                    final_text = last_msg.content
-
-            # 发送结果回主 Agent
-            self.bus.send(
-                sender=name,
-                recipient="User",
-                content=f"[TASK COMPLETED]\n{final_text}",
-                msg_type="message",
-                metadata={"role": role}
-            )
-            
-            # 保存上下文用于之后审阅
-            self.agent_contexts[name] = final_messages
-
-            logger.info(f"Teammate {name} completed task successfully")
+                # 5. 反馈回消息总线
+                self.bus.send(
+                    sender=name,
+                    recipient="User",
+                    content=f"### [Teammate Report: {name}]\n{final_text}",
+                    msg_type="message",
+                    metadata={"role": role}
+                )
+                
+                self.agent_contexts[name] = final_messages
+                logger.info(f"Teammate {name} task finalized and persisted.")
 
         except Exception as e:
-            logger.error(f"Teammate {name} encountered error: {e}")
-            import traceback
-            traceback.print_exc()
-            
-            # 发送错误回主 Agent
+            logger.error(f"Teammate {name} execution failed: {e}")
             self.bus.send(
                 sender=name,
                 recipient="User",
-                content=f"[TASK FAILED]\nError: {e}",
-                msg_type="message"
+                content=f"### [Teammate FAILED: {name}]\nError: {e}",
+                msg_type="error"
             )
 
         finally:

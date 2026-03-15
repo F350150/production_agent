@@ -8,7 +8,9 @@ tools/registry.py - 工具组件注册中心 (LangChain 1.0 重构版)
 底层工具实现（system_tools.py, web_tools.py 等）完全不变。
 """
 
-from typing import Optional, List
+import yaml
+import logging
+from typing import Optional, List, Dict
 from pathlib import Path
 from langchain_core.tools import tool, BaseTool, StructuredTool
 
@@ -22,17 +24,63 @@ from .computer_tools import ComputerTools
 from .mcp_registry import mcp_registry
 from skills.skill_registry import skill_registry
 
+logger = logging.getLogger(__name__)
+
 
 # ==============================================================================
 # 基础工具定义（使用 @tool 装饰器自动生成 Schema）
 # ==============================================================================
 
-# --- 文件系统工具 ---
+# --- 治理配置加载 ---
+GOVERNANCE_CONFIG_PATH = Path(__file__).parent.parent / "config" / "governance.yaml"
+
+def load_governance():
+    """从 yaml 加载治理配置"""
+    if not GOVERNANCE_CONFIG_PATH.exists():
+        return {}
+    try:
+        with open(GOVERNANCE_CONFIG_PATH, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f)
+    except Exception as e:
+        logger.error(f"Failed to load governance config: {e}")
+        return {}
+
+GOVERNANCE = load_governance()
+SANDBOX_ENFORCED = GOVERNANCE.get("sandbox_settings", {}).get("force_docker_sandbox", False)
+
+# --- 文件系统工具 (带沙箱增强) ---
 
 @tool
 async def run_bash(command: str) -> str:
-    """Execute a bash command on the local system."""
+    """Execute a bash command on the local system (or in a Docker sandbox if enforced)."""
     import asyncio
+    from .docker_tools import DOCKER_AVAILABLE
+    
+    if SANDBOX_ENFORCED:
+        # Check if Docker is actually running
+        docker_running = False
+        if DOCKER_AVAILABLE:
+            try:
+                import docker
+                docker.from_env().ping()
+                docker_running = True
+            except:
+                docker_running = False
+        
+        if not docker_running:
+            msg = "⚠️ Sandbox Enforced but Docker is NOT running. "
+            if not DOCKER_AVAILABLE:
+                msg += "Please install docker SDK: pip install docker"
+            else:
+                msg += "Please start your Docker Desktop/Daemon."
+            
+            # 允许在这种情况下尝试本地执行（带警告），否则系统完全不可用
+            logger.warning(msg + f" Falling back to LOCAL for: {command}")
+            return f"{msg}\n[EMERGENCY LOCAL FALLBACK]\n" + await asyncio.to_thread(SystemTools.run_bash, command)
+            
+        logger.info(f"Enforcing Sandbox for run_bash: {command}")
+        return await asyncio.to_thread(DockerTools.sandbox_bash, command, "python:3.11-slim", WORKDIR)
+    
     return await asyncio.to_thread(SystemTools.run_bash, command)
 
 @tool
@@ -44,10 +92,39 @@ async def read_file(path: str) -> str:
 @tool
 async def write_file(path: str, content: str) -> str:
     """Write entire content to a file. Subject to HITL if file exists."""
+    import asyncio
+    # 注意：write_file 在沙箱中较难实现同步回宿主机，目前优先保留宿主机写入（由 HITL 保护）
+    return await asyncio.to_thread(SystemTools.write_file, path, content)
 
 @tool
-def edit_file(path: str, old_text: str, new_text: str) -> str:
-    """Replace exact text snippet in an existing file."""
+async def edit_file(path: str, old_text: str, new_text: str) -> str:
+    """Replace exact text snippet in an existing file. Runs in sandbox if enforced."""
+    import asyncio
+    if SANDBOX_ENFORCED:
+        # 在沙箱中执行 Python 脚本来安全修改文件
+        # 使用环境变量传递内容，避免引号转义地狱
+        py_code = """
+import os
+from pathlib import Path
+path = Path(os.environ['EDIT_PATH'])
+old = os.environ['EDIT_OLD']
+new = os.environ['EDIT_NEW']
+if not path.exists():
+    print(f'ERROR: File {path} not found')
+    exit(1)
+content = path.read_text(encoding='utf-8', errors='replace')
+if old in content:
+    path.write_text(content.replace(old, new), encoding='utf-8')
+    print('SUCCESS')
+else:
+    print('ERROR: old_text not found')
+"""
+        # 我们需要修改 sandbox_bash 来支持环境变量，或者通过 sh -c 传递
+        # 简单起见，这里先用 printf 构造环境变量再执行
+        env_prefix = f"export EDIT_PATH='{path}' EDIT_OLD='{old_text}' EDIT_NEW='{new_text}' && "
+        cmd = f"python3 -c \"{py_code}\""
+        return await asyncio.to_thread(DockerTools.sandbox_bash, env_prefix + cmd, "python:3.11-slim", WORKDIR)
+    
     return SystemTools.edit_file(path, old_text, new_text)
 
 @tool
@@ -212,17 +289,11 @@ def create_team_tools(team_manager):
     @tool
     def spawn_subagent(name: str, role: str, prompt: str) -> str:
         """
-        Spawn a new background sub-agent in an isolated context to work on a specific prompt.
+        Spawn a new background sub-agent (LangGraph-backed) in an isolated context to work on a specific prompt.
         Roles available: 'Explore', 'Research', 'Test', 'CodeReview', 'Document'.
-        Name must be unique. The sub-agent will run concurrently and report back its findings.
+        Name must be unique. Progress is persisted in SQLite via thread_id: teammate_{name}.
+        The sub-agent will run concurrently and report back its findings.
         """
-        import asyncio
-        import nest_asyncio
-        nest_asyncio.apply()
-        
-        # 由于 spawn 现在是一个 sync wrapper for an async task creation (asyncio.create_task),
-        # 这意味着在标准环境下，LangGraph 会在自己的 event loop 执行 tools。
-        # 已经将其实现为 a sync interface spawning a task into the running loop
         return team_manager.spawn(name, role, prompt)
 
     @tool
@@ -281,46 +352,33 @@ class ToolRegistry:
     @staticmethod
     def get_role_tools(role: str, todo_manager=None, team_manager=None) -> List[BaseTool]:
         """
-        根据角色下发工具子集
-
-        【设计意图】
-        不同角色有不同的职责边界。PM 不能编辑代码，Coder 不能审批设计。
-        通过白名单过滤避免 LLM 的幻觉和越权。
+        根据角色下发工具子集 (基于 governance.yaml 配置)
         """
         ToolRegistry._ensure_initialized()
 
-        role_allowed = {
-            "ProductManager": [
-                "web_search", "fetch_url", "compress",
-                "task_create", "task_update", "task_claim", "task_list",
-                "browser_open", "browser_screenshot", "computer_screenshot",
-                "spawn_subagent", "subagent_status",
-            ],
-            "Architect": [
-                "get_repo_map", "index_codebase", "semantic_search_code",
-                "read_file", "list_files", "compress",
-                "task_create", "task_update", "task_claim", "task_list",
-                "spawn_subagent", "subagent_status",
-            ],
-            "Coder": [
-                "read_file", "write_file", "edit_file", "run_bash", "list_files", "compress",
-                "task_update", "task_claim", "task_list",
-                "browser_open", "browser_screenshot", "browser_click", "browser_type", "browser_scroll",
-                "computer_screenshot", "mouse_move", "mouse_click", "key_type",
-            ],
-            "QA_Reviewer": [
-                "sandbox_bash", "read_file", "write_file", "run_bash", "compress",
-                "task_update", "task_claim", "task_list",
-                "browser_open", "browser_screenshot", "computer_screenshot",
-                "web_search", "fetch_url",
-            ],
-        }
+        # 优先读取动态配置
+        rbac = GOVERNANCE.get("role_permissions", {})
+        allowed_names = rbac.get(role, [])
+
+        # 如果配置中有 'base_tools'，则合并基础工具
+        if "base_tools" in allowed_names:
+            base_set = ["compress", "task_update", "task_claim", "task_list", "subagent_status"]
+            allowed_names = list(set(allowed_names + base_set))
 
         all_tools = ToolRegistry.get_all_tools(todo_manager, team_manager)
-        allowed_names = role_allowed.get(role, [])
+        
+        # 如果动态配置为空，使用硬编码兜底
+        if not allowed_names:
+            role_allowed_fallback = {
+                "ProductManager": ["web_search", "fetch_url", "compress", "task_create", "task_update", "task_claim", "task_list"],
+                "Architect": ["get_repo_map", "index_codebase", "read_file", "list_files", "compress"],
+                "Coder": ["read_file", "write_file", "edit_file", "run_bash", "list_files", "compress"],
+                "QA_Reviewer": ["sandbox_bash", "read_file", "run_bash", "compress", "web_search"],
+            }
+            allowed_names = role_allowed_fallback.get(role, [])
 
         if not allowed_names:
-            return all_tools  # 未知角色返回全部
+            return all_tools
 
         return [t for t in all_tools if t.name in allowed_names]
 

@@ -1,64 +1,67 @@
 # Swarm 拓扑与编排设计 (Swarm Topology)
 
-在 **Production Agent** 中，我们并没有采用简单的“一个智能体打天下”模式，而是实现了一套**分布式的多智能体协同系统**（Figure-Eight Multi-Agent Swarm）。这种架构的核心在于“分治”与“专业化”。
+在 **Production Agent** 中，我们利用 **LangGraph** 实现了一套工业级的多智能体协同系统。不再通过简单的 Loop，而是通过有向有环图来管理复杂的推理流转。
 
 ---
 
-## 🎨 协同范式：中心化编排 (Orchestration)
+## 🎨 核心拓扑：基于状态转移的专家系统
 
-智能体协同通常分为两种模式：
--   **舞蹈模式 (Choreography)**：Agent 之间互相发送消息，由被动触发决定下一步。
--   **编排模式 (Orchestration)**：存在一个中心协调器（Orchestrator）来决定当前谁握有主控权。
+本项目采用了 **Swarm (蜂群)** 范式，其精髓在于“控制权”的动态流转。每个智能体都是图中的一个节点，通过工具调用触发边缘跳转。
 
-本项目选择了**编排模式**，通过 `SwarmOrchestrator` 管理各个角色。这种模式在工程上具备更高的可预测性和可调试性。
+### 1. 四大核心专家角色
+-   **ProductManager (PM)**：需求守门员。负责拆解任务、澄清需求、并在任务完成时交接给用户。
+-   **Architect (架构师)**：技术领航员。扫描代码库 (AST/RAG)，制定实施方案。
+-   **Coder (开发者)**：执行者。针对具体文件执行读写、补丁修复和本地命令测试。
+-   **QA_Reviewer (质检员)**：最后防线。执行集成测试、代码审查，并具备联网搜索最新 API 文档的能力。
 
----
-
-## 🤝 控制权转移机制 (Handover Logic)
-
-控制权转移是 Swarm 灵活性体现的核心。在本项目中，它通过一个特殊的**逻辑钩子**实现：
-
-### 1. 技术实现原理
--   我们向所有智能体注入了一个名为 `handover_to` 的工具。
--   当 Agent 执行该工具时，会向系统总线投送一个携带 `__HANDOVER_SIGNAL__` 前缀的字符串。
--   `SwarmOrchestrator` 会在工具执行结果中识别该特殊信号，并立即触发环境切换。
-
-### 2. 上下文 (Context) 的继承与隔离
--   **继承**：新接管的智能体会继承之前的对话摘要，确保不会丢失用户的主要目标。
--   **隔离**：每个智能体节点都有独立的 `Instructions`（系统提示词）和专用工具集。例如，`ProductManager` 无法直接调用 `write_file`，从而防止了它因权限过大而产生的输出偏移（Hallucination）。
+### 2. 特殊辅助节点
+-   **`summarizer` (总结节点)**：所有流转的中转站。当对话超过 25 轮或 Token 数过载时，它会自动压缩历史，确保上下文不溢出且请求成本可控。
+-   **`diagnoser` (自愈节点)**：当 `Coder` 或 `QA` 在执行 Bash 命令/代码片段报错时（如环境缺失、格式错误），系统会自动跳入此节点。LLM 会分析 `stderr` 并给出针对性修复建议（如 `pip install`），实现无人值守的故障自愈。
 
 ---
 
-## 🧬 典型的动态角色拓扑
+## 🤝 控制权转移机制 (Handoff Logic)
 
-以下是一个标准的“需求到代码”任务在 Swarm 中的流转过程：
+### 1. 技术实现：`handoff_tool`
+我们使用了 `langgraph-swarm` 提供的 `create_handoff_tool`。当智能体调用 `transfer_to_coder` 等工具时：
+1.  当前节点的 ReAct 循环终止。
+2.  `active_agent` 状态被修改为目标角色。
+3.  控制权跳回 `summarizer`，由其路由到下一个专家节点。
 
-1.  **ProductManager (PM)**：
-    -   *职能*：理解用户模糊输入，拆解为 `Task`。
-    -   *动作*：创建任务后，调用 `handover_to("Architect")`。
-2.  **Architect (架构师)**：
-    -   *职能*：分析项目依赖，决定文件目录结构。
-    -   *动作*：制定方案后，调用 `handover_to("Engineer")`。
-3.  **Engineer (工程师)**：
-    -   *职能*：通过 `skills` 或 `base_tools` 完成具体代码逻辑。
-    -   *动作*：完成后将任务状态置为 `completed`。
+### 2. 上下文的继承与清洗
+-   **继承**：新节点会继承之前的任务列表 (`todo`) 和消息序列。
+-   **清洗 (SystemMessage Scrubbing)**：为了解决某些模型（如 Anthropic）不允许多条 SystemMessage 的限制，系统在进入新节点前会清洗旧的身份指令，并注入当前角色的专属指令。
 
 ---
 
-## 🚀 垂直化子智能体 (Nested Sub-agents)
+## 🧬 典型流转流程
 
-除了横向的控制权转移，我们还支持**纵向的智能体调用**。
--   **场景**：当 `Lead Agent` 正在专注于编写代码，但突然需要去互联网检索一个特定的 API 时。
--   **实现**：它会调用 `run_subagent`。这是一个**阻塞式调用**，父智能体会启动一个临时的子智能体去执行任务并返回结果，而主逻辑不发生 Handover。
+```mermaid
+stateDiagram-v2
+    [*] --> summarizer
+    summarizer --> ProductManager: 初始入口
+    
+    ProductManager --> summarizer: transfer_to_coder
+    ProductManager --> [*]: 最终答复用户
+    
+    Coder --> diagnoser: 工具执行报错 (stderr)
+    diagnoser --> Coder: 提供修复脚本
+    
+    Coder --> summarizer: transfer_to_qa_reviewer
+    
+    QA_Reviewer --> Coder: 测试未通过 (redo)
+    QA_Reviewer --> [*]: 交付确认
+```
 
 ---
 
-## 💡 开发提示：如何扩展 Swarm 节点
+## 🚀 开发者扩展指南
 
-要将此系统扩展到企业级环境（如增加一个 `SecurityAuditor`），你只需：
-1.  在 `core/swarm.py` 的 `agent_configs` 中新增一个 key。
-2.  定义高度受限的 `instructions`。
-3.  在原有 Agent 的 Prompt 中加入“什么时候该移交给 SecurityAuditor”的判别逻辑。
+要增加一个新角色（如 `Security_Auditor`）：
+1.  **定义工具**：在 `tools/registry.py` 中定义其专属工具集。
+2.  **注册节点**：在 `core/swarm.py` 的 `_build_swarm` 中将其添加到 `role_names`。
+3.  **注入 Handoff**：系统会自动为其他角色生成 `transfer_to_security_auditor` 工具。
+4.  **配置权限**：在 `config/governance.yaml` 中配置其 RBAC 权限。
 
 > [!TIP]
-> **设计经验**：Swarm 的精髓在于**动态限制 (Dynamic Constraint)**。通过 Handover，我们在每一时刻都只给模型提供最精准的 5-8 个工具，这比给它 50 个工具的成功率要高出数倍。
+> **设计经验**：Swarm 的精髓在于**动态限制**。在每一时刻，我们只给模型提供最精准的 5-8 个工具，这比一次性塞给它 50 个工具的成功率要高出数倍，幻觉率也更低。

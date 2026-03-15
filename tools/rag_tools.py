@@ -70,15 +70,24 @@ class RAGTools:
                 
             try:
                 content = f.read_text(encoding="utf-8")
-                # 简单分块：按每 100 行代码进行粗切分 (Chunking)，确保召回时粒度精细
+                
+                # 提取关系上下文 (Enhanced Graph RAG)
+                from .ast_tools import ASTTools
+                rel_context = ASTTools.get_relational_context(content) if f.suffix == ".py" else ""
+
+                # 简单分块：按每 100 行代码进行粗切分 (Chunking)
                 lines = content.split('\n')
                 chunk_size = 100
                 for i in range(0, len(lines), chunk_size):
-                    chunk = "\n".join(lines[i:i+chunk_size])
-                    if len(chunk.strip()) < 10:
+                    chunk_text = "\n".join(lines[i:i+chunk_size])
+                    if len(chunk_text.strip()) < 10:
                         continue
+                    
+                    # 组合增强版文档内容
+                    enriched_doc = f"{rel_context}File: {f.relative_to(workdir)}\n{chunk_text}"
+                    
                     chunk_id = f"{f.relative_to(workdir)}_{i}"
-                    documents.append(chunk)
+                    documents.append(enriched_doc)
                     metadatas.append({"file": str(f.relative_to(workdir)), "start_line": i})
                     ids.append(chunk_id)
             except Exception as e:

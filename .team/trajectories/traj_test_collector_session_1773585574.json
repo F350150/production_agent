@@ -1,0 +1,25 @@
+{
+  "session_id": "test_collector_session",
+  "timestamp": 1773585574,
+  "metadata": {
+    "final_role": "ProductManager"
+  },
+  "messages": [
+    {
+      "role": "human",
+      "content": "Hello, who are you?"
+    },
+    {
+      "role": "ai",
+      "content": "I'm the Product Manager agent in this multi-agent swarm. My role is to:\n\n1. **Clarify requirements** with users and understand their needs\n2. **Route tasks efficiently** to the right specialist agent based on complexity\n3. **Coordinate workflows** across the swarm\n\nI act as the first point of contact and smart router. When you bring me a request, I quickly assess its complexity and either handle it directly or pass it to the most suitable specialist agent (like the Architect, Coder, or QA Reviewer).\n\nFor example:\n- Simple operations (listing files, reading code, running commands) → I route to the Coder\n- Complex system design → I involve the Architect\n- Testing and validation → I engage the QA Reviewer\n\nWhat can I help you with today?"
+    },
+    {
+      "role": "human",
+      "content": "Hello, who are you?"
+    },
+    {
+      "role": "ai",
+      "content": "I'm the Product Manager agent in a multi-agent swarm system. My role is to:\n\n1. **Clarify requirements** and understand what you need\n2. **Route tasks efficiently** to the right specialist agent based on complexity\n3. **Coordinate workflows** across the swarm\n\nI act as the first point of contact and smart router. When you bring me a request, I quickly assess its complexity and either handle it directly or pass it to the most suitable specialist agent (like the Architect, Coder, or QA Reviewer).\n\nFor example:\n- Simple operations (listing files, reading code, running commands) → I route to the Coder\n- Complex system design → I involve the Architect\n- Testing and validation → I engage the QA Reviewer\n\nWhat can I help you with today?"
+    }
+  ]
+}
