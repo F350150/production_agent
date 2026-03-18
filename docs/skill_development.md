@@ -67,6 +67,39 @@ class CodeReviewSkill(Skill):
 
 ---
 
+## 📦 内置技能 (Built-in Skills)
+
+项目内置了 5 个实用技能：
+
+| 技能名称 | 功能 | 主要参数 |
+|----------|------|----------|
+| `debug_explain` | 解析错误堆栈，提供修复建议 | `error_traceback`: 错误堆栈 |
+| `generate_test` | 生成 pytest 测试用例 | `target`: 文件路径或代码 |
+| `api_design_review` | 评估 API 设计质量 | `target`: 文件路径 |
+| `dependency_analysis` | 分析导入/调用图 | `target`: 项目路径 |
+| `code_migration` | 代码框架迁移 | `target`: 文件路径, `migration_type`: 迁移类型 |
+
+### 使用示例
+```python
+# 通过 use_skill 工具调用
+use_skill(
+    skill_name="debug_explain",
+    parameters={"error_traceback": "NameError: name 'x' is not defined"}
+)
+
+use_skill(
+    skill_name="generate_test",
+    parameters={"target": "path/to/module.py"}
+)
+
+use_skill(
+    skill_name="code_migration",
+    parameters={"target": "app.py", "migration_type": "flask_to_fastapi"}
+)
+```
+
+---
+
 ## 💡 开发者的深度建议：什么时候该写 Skill？
 
 并不是所有逻辑都应该交给智能体思考。以下场景必须通过 Skill 封装：

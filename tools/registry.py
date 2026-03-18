@@ -26,6 +26,8 @@ from skills.skill_registry import skill_registry
 
 logger = logging.getLogger(__name__)
 
+_TOOL_HANDLERS_REGISTRY: dict = {}
+
 
 # ==============================================================================
 # 基础工具定义（使用 @tool 装饰器自动生成 Schema）
@@ -305,6 +307,43 @@ def create_team_tools(team_manager):
 
 
 # ==============================================================================
+# 技能工具（use_skill - 封装多个基础工具调用的高级技能）
+# ==============================================================================
+
+@tool
+async def use_skill(skill_name: str, parameters: dict) -> str:
+    """
+    Execute a pre-built multi-step skill that orchestrates multiple tools internally.
+    Available skills are registered in the SkillRegistry.
+    
+    Skills provide high-level operations like:
+    - debug_explain: Parse error tracebacks and suggest fixes
+    - generate_test: Generate pytest test cases from functions
+    - api_design_review: Analyze API design quality
+    - dependency_analysis: Analyze import/call graphs
+    - code_migration: Migrate code between frameworks
+    """
+    handlers = _TOOL_HANDLERS_REGISTRY
+    if not handlers:
+        return "Error: Tool handlers not initialized. Please restart the agent."
+    
+    skill_schema = skill_registry.get_skill_tool_schema()
+    if not skill_schema:
+        return "Error: No skills available."
+    
+    skill_names = skill_registry.get_skill_names()
+    if skill_name not in skill_names:
+        return f"Error: Unknown skill '{skill_name}'. Available: {skill_names}"
+    
+    skill_handler = skill_registry.get_skill_handler(handlers)
+    try:
+        return skill_handler(skill_name=skill_name, parameters=parameters)
+    except Exception as e:
+        logger.error(f"[use_skill] Error executing skill '{skill_name}': {e}")
+        return f"Error executing skill '{skill_name}': {e}"
+
+
+# ==============================================================================
 # 工具注册表类（保留角色权限分组逻辑）
 # ==============================================================================
 
@@ -328,6 +367,58 @@ class ToolRegistry:
             cls._initialized = True
 
     @staticmethod
+    def _create_mcp_tools() -> List[BaseTool]:
+        """将 MCP schemas 转换为 LangChain StructuredTool"""
+        from langchain_core.tools import StructuredTool
+        from pydantic import BaseModel, Field
+        
+        mcp_schemas = mcp_registry.get_mcp_tools_schema()
+        mcp_handlers = mcp_registry.get_mcp_handlers()
+        
+        mcp_tools = []
+        for schema in mcp_schemas:
+            tool_name = schema.get("name")
+            if not tool_name or tool_name not in mcp_handlers:
+                continue
+            
+            handler = mcp_handlers[tool_name]
+            description = schema.get("description", "")
+            input_schema = schema.get("input_schema", {"type": "object", "properties": {}})
+            
+            # 从 input_schema 构建 Pydantic 模型
+            properties = input_schema.get("properties", {})
+            field_definitions = {}
+            for param_name, param_info in properties.items():
+                param_type = param_info.get("type", "string")
+                field_definitions[param_name] = (str, Field(description=param_info.get("description", "")))
+            
+            class ToolArgs(BaseModel):
+                """动态创建的 MCP 工具参数模型"""
+                pass
+            
+            for name, (typ, field) in field_definitions.items():
+                ToolArgs.__fields__[name] = (typ, field)
+            
+            def make_func(h):
+                def call(**kwargs):
+                    return h(**kwargs)
+                return call
+            
+            try:
+                tool = StructuredTool(
+                    name=tool_name,
+                    description=description,
+                    args_schema=ToolArgs,
+                    func=make_func(handler),
+                )
+                mcp_tools.append(tool)
+                logger.debug(f"[ToolRegistry] Added MCP tool: {tool_name}")
+            except Exception as e:
+                logger.warning(f"[ToolRegistry] Failed to create MCP tool '{tool_name}': {e}")
+        
+        return mcp_tools
+
+    @staticmethod
     def get_all_tools(todo_manager=None, team_manager=None) -> List[BaseTool]:
         """获取所有 LangChain 工具实例"""
         ToolRegistry._ensure_initialized()
@@ -338,8 +429,12 @@ class ToolRegistry:
             web_search, fetch_url, sandbox_bash,
             browser_open, browser_screenshot, browser_click, browser_type, browser_scroll,
             computer_screenshot, mouse_move, mouse_click, key_type,
-            compress,
+            compress, use_skill,
         ]
+
+        # 添加 MCP 工具
+        mcp_tools = ToolRegistry._create_mcp_tools()
+        tools.extend(mcp_tools)
 
         if todo_manager:
             tools.extend(create_task_tools(todo_manager))
@@ -355,6 +450,9 @@ class ToolRegistry:
         根据角色下发工具子集 (基于 governance.yaml 配置)
         """
         ToolRegistry._ensure_initialized()
+
+        if not _TOOL_HANDLERS_REGISTRY:
+            ToolRegistry.get_base_handlers(todo_manager, team_manager)
 
         # 优先读取动态配置
         rbac = GOVERNANCE.get("role_permissions", {})
@@ -401,7 +499,9 @@ class ToolRegistry:
         return schemas
 
     @staticmethod
-    def get_base_handlers(todo_manager):
-        """兼容旧接口：返回工具名 -> 执行函数的映射"""
-        all_tools = ToolRegistry.get_all_tools(todo_manager)
-        return {t.name: (lambda tool=t: lambda **kw: tool.invoke(kw))(t) for t in all_tools}
+    def get_base_handlers(todo_manager, team_manager=None):
+        """兼容旧接口：返回工具名 -> 执行函数的映射，同时更新全局处理器注册表供 use_skill 使用"""
+        all_tools = ToolRegistry.get_all_tools(todo_manager, team_manager)
+        handlers = {t.name: (lambda tool=t: lambda **kw: tool.invoke(kw))(t) for t in all_tools}
+        _TOOL_HANDLERS_REGISTRY.update(handlers)
+        return handlers

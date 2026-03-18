@@ -241,13 +241,16 @@ class TestMCPRegistry:
         import tools.mcp_registry as mreg
         mreg._tool_to_server.clear()
 
-    def test_no_env_var_loads_nothing(self):
-        """验证没有 MCP_SERVERS 环境变量时，初始化后工具列表为空"""
+    def test_no_mcp_config_loads_nothing(self):
+        """验证没有 MCP 配置时，初始化后工具列表为空"""
         import os
         os.environ.pop("MCP_SERVERS", None)
-        self.registry.initialize()
-        assert self.registry.get_mcp_tools_schema() == []
-        assert self.registry.get_mcp_handlers() == {}
+
+        with patch("tools.mcp_registry.Path") as mock_path:
+            mock_path.return_value.exists.return_value = False
+            self.registry.initialize()
+            assert self.registry.get_mcp_tools_schema() == []
+            assert self.registry.get_mcp_handlers() == {}
 
     @patch("tools.mcp_registry.create_mcp_client")
     def test_env_var_connects_servers(self, mock_create):

@@ -30,11 +30,18 @@ import json
 import logging
 import os
 import threading
+from pathlib import Path
 from typing import Callable, Optional
 
 from tools.mcp_client import MCPClientBase, create_mcp_client
 
 logger = logging.getLogger(__name__)
+
+YAML_AVAILABLE = True
+try:
+    import yaml
+except ImportError:
+    YAML_AVAILABLE = False
 
 # 全局：工具名 -> MCP 服务名 的路由表（用于 handler 分发）
 _tool_to_server: dict[str, str] = {}
@@ -42,21 +49,38 @@ _tool_to_server: dict[str, str] = {}
 
 def _load_mcp_servers() -> list[dict]:
     """
-    从 MCP_SERVERS 环境变量加载 MCP 服务配置列表。
+    从多个来源加载 MCP 服务配置列表，优先级：
+    1. MCP_SERVERS 环境变量（JSON 格式）
+    2. config/mcp_servers.yaml 配置文件
+
     若未配置则返回空列表（静默降级，不影响 Agent 正常运行）。
     """
     raw = os.getenv("MCP_SERVERS", "").strip()
-    if not raw:
-        return []
-    try:
-        servers = json.loads(raw)
-        if not isinstance(servers, list):
-            logger.warning("[MCPRegistry] MCP_SERVERS 应为 JSON 数组，已忽略")
-            return []
-        return servers
-    except json.JSONDecodeError as e:
-        logger.error(f"[MCPRegistry] 解析 MCP_SERVERS 失败: {e}")
-        return []
+    if raw:
+        try:
+            servers = json.loads(raw)
+            if not isinstance(servers, list):
+                logger.warning("[MCPRegistry] MCP_SERVERS 应为 JSON 数组，已忽略")
+                return []
+            logger.info(f"[MCPRegistry] Loaded {len(servers)} MCP servers from environment")
+            return servers
+        except json.JSONDecodeError as e:
+            logger.error(f"[MCPRegistry] 解析 MCP_SERVERS 失败: {e}")
+
+    if YAML_AVAILABLE:
+        yaml_path = Path(__file__).parent.parent / "config" / "mcp_servers.yaml"
+        if yaml_path.exists():
+            try:
+                with open(yaml_path, "r", encoding="utf-8") as f:
+                    config = yaml.safe_load(f)
+                servers = config.get("mcp_servers", []) if isinstance(config, dict) else []
+                if servers:
+                    logger.info(f"[MCPRegistry] Loaded {len(servers)} MCP servers from {yaml_path}")
+                return servers
+            except Exception as e:
+                logger.error(f"[MCPRegistry] 解析 {yaml_path} 失败: {e}")
+
+    return []
 
 
 def _anthropic_schema(mcp_tool: dict) -> dict:

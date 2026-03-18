@@ -21,6 +21,7 @@ role_permissions:
     - base_tools
     - read_file
     - web_search
+    - use_skill
   Coder:
     - base_tools
     - read_file
@@ -28,12 +29,14 @@ role_permissions:
     - edit_file
     - run_bash
     - sandbox_bash
+    - use_skill
   QA_Reviewer:
     - base_tools
     - read_file
     - run_bash
     - sandbox_bash
     - web_search
+    - use_skill
 
 # Sandbox Enforcement Settings
 sandbox_settings:

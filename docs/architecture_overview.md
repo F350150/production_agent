@@ -38,6 +38,20 @@
 -   **Docker 沙盒**: 自动执行危险命令隔离。
 -   **Tool Resilience**: 内置容灾机制。如果 Docker 未启动，系统会自动回退到本地执行并给出警告，而不是直接崩溃。
 -   **Graph RAG**: 结合 `ASTTools` 和 `RAGTools`，实现代码关系感知（如类继承关系）的语义搜索。
+-   **MCP 传输**: 支持 stdio 和 HTTP/JSON-RPC 两种传输模式。
+
+### 5. 技能系统 (Skills) - `skills/`
+-   **SkillRegistry**: 自动发现和加载内置技能。
+-   **use_skill 工具**: 统一调用接口，支持 `debug_explain`, `generate_test`, `api_design_review`, `dependency_analysis`, `code_migration` 等技能。
+
+### 6. LangChain 增强 (LangChain Enhancements) - `core/langchain_enhancements.py`
+-   **LCELChainBuilder**: LCEL 链式调用构建器
+-   **ToolBinder**: 工具自动绑定器
+-   **EnhancedMemory**: 增强记忆管理
+-   **LangChainRAG**: RetrievalQA 链集成
+-   **StreamingManager**: 流式输出管理器
+-   **LangSmithEvaluator**: LangSmith 评估器
+-   **MultiAgentFactory**: 多 Agent 工厂
 
 ---
 

@@ -291,6 +291,103 @@ class SSEMCPClient(MCPClientBase):
             return f"Error calling MCP tool '{tool_name}': {e}"
 
 
+class HttpMCPClient(MCPClientBase):
+    """
+    HTTP/JSON-RPC 传输的 MCP 客户端（用于连接 FastMCP 服务）。
+
+    典型用法：
+        client = HttpMCPClient(name="fastapi", url="http://localhost:8000/mcp")
+        tools = client.list_tools()
+        result = client.call_tool("query_db", {"sql": "SELECT 1"})
+
+    【依赖】：需要 httpx 库。
+    【特点】：与 FastMCP 兼容，支持同步 HTTP/JSON-RPC 调用。
+    """
+
+    def __init__(self, name: str, url: str, timeout: int = 30):
+        super().__init__(name)
+        base_url = url.rstrip("/")
+        if not base_url.endswith("/mcp"):
+            base_url += "/mcp"
+        self.url = base_url
+        self.timeout = timeout
+        self._initialized = False
+        self._capabilities: dict = {}
+        self._connect()
+
+    def _connect(self):
+        import httpx
+        try:
+            resp = httpx.post(
+                self.url,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": _next_rpc_id(),
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {"tools": {}},
+                        "clientInfo": {"name": "production_agent", "version": "1.0"}
+                    }
+                },
+                timeout=self.timeout
+            )
+            resp.raise_for_status()
+            result = resp.json()
+            self._capabilities = result.get("capabilities", {})
+            self._initialized = True
+            httpx.post(
+                self.url,
+                json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+                timeout=5
+            )
+            logger.info(f"[MCP-HTTP] '{self.name}' initialized (capabilities: {self._capabilities})")
+        except ImportError:
+            raise RuntimeError("HTTP MCP client requires 'httpx'. Run: pip install httpx")
+        except Exception as e:
+            logger.error(f"[MCP-HTTP] Handshake failed for '{self.name}': {e}")
+            raise RuntimeError(f"MCP-HTTP connection to '{self.name}' failed: {e}") from e
+
+    def _rpc(self, method: str, params: Optional[dict] = None) -> dict:
+        import httpx
+        req_id = _next_rpc_id()
+        payload: dict = {"jsonrpc": "2.0", "id": req_id, "method": method}
+        if params:
+            payload["params"] = params
+        resp = httpx.post(self.url, json=payload, timeout=self.timeout)
+        resp.raise_for_status()
+        return resp.json()
+
+    def list_tools(self) -> list[dict]:
+        try:
+            resp = self._rpc("tools/list")
+            tools = resp.get("result", {}).get("tools", [])
+            logger.info(f"[MCP-HTTP] '{self.name}' listed {len(tools)} tools")
+            return tools
+        except Exception as e:
+            logger.error(f"[MCP-HTTP] list_tools failed for '{self.name}': {e}")
+            return []
+
+    def call_tool(self, tool_name: str, arguments: dict) -> str:
+        try:
+            resp = self._rpc("tools/call", {"name": tool_name, "arguments": arguments})
+            result = resp.get("result", {})
+            content_blocks = result.get("content", [])
+            parts = []
+            for block in content_blocks:
+                if isinstance(block, dict):
+                    text = block.get("text") or block.get("data") or str(block)
+                    parts.append(text)
+            return "\n".join(parts) if parts else str(result)
+        except Exception as e:
+            logger.error(f"[MCP-HTTP] call_tool '{tool_name}' failed: {e}")
+            return f"Error calling MCP tool '{tool_name}': {e}"
+
+    def close(self):
+        self._initialized = False
+        logger.info(f"[MCP-HTTP] '{self.name}' connection closed")
+
+
 def create_mcp_client(name: str, config: dict) -> MCPClientBase:
     """
     工厂函数：根据配置字典创建对应的 MCP 客户端。
@@ -299,7 +396,10 @@ def create_mcp_client(name: str, config: dict) -> MCPClientBase:
         {"transport": "stdio", "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/tmp"]}
 
     config 示例（SSE）:
-        {"transport": "sse", "url": "http://localhost:3000/sse"}
+        {"transport": "sse", "url": "http://localhost:3001/sse"}
+
+    config 示例（HTTP/FastMCP）:
+        {"transport": "http", "url": "http://localhost:8000/mcp"}
     """
     transport = config.get("transport", "stdio").lower()
     if transport == "stdio":
@@ -312,5 +412,10 @@ def create_mcp_client(name: str, config: dict) -> MCPClientBase:
         if not url:
             raise ValueError(f"MCP server '{name}' with sse transport requires 'url'")
         return SSEMCPClient(name=name, url=url)
+    elif transport == "http":
+        url = config.get("url")
+        if not url:
+            raise ValueError(f"MCP server '{name}' with http transport requires 'url'")
+        return HttpMCPClient(name=name, url=url)
     else:
-        raise ValueError(f"Unknown MCP transport: '{transport}'. Supported: stdio, sse")
+        raise ValueError(f"Unknown MCP transport: '{transport}'. Supported: stdio, sse, http")

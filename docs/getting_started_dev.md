@@ -24,6 +24,35 @@ pip install docker chromadb tree-sitter playwright duckduckgo-search
 复制样板并填入大模型凭据。
 -   **MODEL_ID**: 建议使用 `claude-3-5-sonnet-20241022` 或更高性能模型以保证 Swarm 逻辑稳定。
 -   **Docker 说明**：非强制。若未启动 Docker，系统会自动执行本地回退逻辑并报警。
+-   **MCP 配置**：支持通过 `.env` 或 `config/mcp_servers.yaml` 配置 MCP 服务器。
+
+### 4. MCP 服务器配置
+支持两种配置方式：
+
+**方式一：环境变量**
+```env
+MCP_SERVERS='[{"name":"filesystem","transport":"stdio","command":["npx","-y","@modelcontextprotocol/server-filesystem","./"]}]'
+```
+
+**方式二：YAML 配置文件**（推荐）
+```yaml
+# config/mcp_servers.yaml
+mcp_servers:
+  - name: filesystem
+    transport: stdio
+    command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "./"]
+  - name: fastapi_service
+    transport: http
+    url: http://localhost:8000/mcp
+```
+
+### 5. 技能配置
+技能默认从 `skills/builtin` 目录加载，也支持自定义路径：
+```yaml
+skills:
+  builtin_path: skills/builtin
+  custom_path: ~/my_skills
+```
 
 ---
 
@@ -68,11 +97,23 @@ python main.py
 ```bash
 # 运行所有测试并获取报告路径
 ./scripts/run_tests.sh
+
+# 运行特定测试
+python -m pytest tests/test_skills.py -v
+python -m pytest tests/test_rag_enhanced.py -v
+python -m pytest tests/test_langchain_enhancements.py -v
+python -m pytest tests/test_http_mcp_client.py -v
 ```
-该脚本会自动：
-1. 设置 `PYTHONPATH` 环境变量。
-2. 运行所有 pytest 测试用例。
-3. 打印出 HTML 覆盖率报告的 **绝对路径**，方便你直接预览。
+
+### 测试覆盖
+| 测试文件 | 测试数量 | 说明 |
+|----------|----------|------|
+| `test_skills.py` | 23 | 5 个新技能测试 |
+| `test_http_mcp_client.py` | 9 | HTTP MCP 和 YAML 配置测试 |
+| `test_mcp_client.py` | 11 | MCP 客户端核心测试 |
+| `test_rag_enhanced.py` | 16 | RAG 增强功能测试 |
+| `test_langchain_enhancements.py` | 23 | LangChain 增强测试 |
+| **总计** | **82+** | **80 passed, 2 skipped** |
 
 > [!WARNING]
 > **资源占用说明**：某些 MCP 服务（如浏览器驱动）可能会非常消耗资源或保持进程常驻。如果发现系统响应变慢，请通过 `ps aux | grep node` 或 `ps aux | grep python` 检查是否有僵尸进程。

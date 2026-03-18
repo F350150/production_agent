@@ -26,23 +26,114 @@
 ### 🟣 第三阶段：进阶能力 (Advanced Features)
 | 指南名称 | 核心内容 | 推荐人群 |
 | :--- | :--- | :--- |
-| [📡 MCP 深度开发](./mcp_development.md) | 模型上下文协议揭秘、非阻塞 I/O 模型与 Stdio 通信。 | *关注：能力扩展与插件开发* |
+| [📡 MCP 深度开发](./mcp_development.md) | 模型上下文协议揭秘、Stdio 与 HTTP 传输模式。 | *关注：能力扩展与插件开发* |
 | [📊 可观测性链路追踪](./observability.md) | LangSmith 探针集成、执行链路透明化与调试。 | *关注：生产监控与质量分析* |
 | [🖥️ 可视化管理后台](./web_ui.md) | Streamlit 实战：如何运行 Web 端 Swarm 控制台。 | *关注：交互体验与图化展示* |
 | [🧬 LoRA 微调指南](./lora_finetuning.md) | 轨迹收集、数据清洗及专家模型训练实战。 | *关注：模型进化与专家角色* |
+
+### 🟡 第四阶段：最新功能 (Latest Features)
+| 指南名称 | 核心内容 | 推荐人群 |
+| :--- | :--- | :--- |
+| [🧪 IT 测试场景](./it_test_scenarios.md) | MCP、Skill、RAG 完整集成测试场景。 | *必读：验证功能正确性* |
+
+---
+
+## 🆕 最新功能指南 (New Features)
+
+### MCP HTTP 传输支持
+本项目支持两种 MCP 传输模式：
+
+**Stdio 模式**（传统）：
+```yaml
+mcp_servers:
+  - name: filesystem
+    transport: stdio
+    command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "./"]
+```
+
+**HTTP 模式**（新增，支持 FastMCP）：
+```yaml
+mcp_servers:
+  - name: fastapi_service
+    transport: http
+    url: http://localhost:8000/mcp
+    timeout: 60
+```
+
+详细配置请参考：[MCP 深度开发](./mcp_development.md)
+
+### 开发者技能系统
+内置 5 个实用技能，开箱即用：
+
+| 技能 | 命令 | 功能 |
+|------|------|------|
+| `debug_explain` | `use_skill("debug_explain", {"error_traceback": "..."})` | 解析错误堆栈，提供修复建议 |
+| `generate_test` | `use_skill("generate_test", {"target": "path/to/file.py"})` | 生成 pytest 测试用例 |
+| `api_design_review` | `use_skill("api_design_review", {"target": "path/to/file.py"})` | 评估 API 设计质量 |
+| `dependency_analysis` | `use_skill("dependency_analysis", {"target": "path/to/project"})` | 分析导入/调用图 |
+| `code_migration` | `use_skill("code_migration", {"target": "path/to/file.py", "migration_type": "flask_to_fastapi"})` | 代码框架迁移 |
+
+详细使用请参考：[技能开发实战](./skill_development.md)
+
+### RAG 增强
+| 功能 | 说明 |
+|------|------|
+| **语义分块** | 基于 AST 按函数/类边界切分，保留语义完整性 |
+| **BM25 索引** | 关键词索引，提升精确匹配能力 |
+| **混合搜索** | 向量相似度 + BM25 融合，提高召回率 |
+
+### LangChain 集成增强
+| 组件 | 说明 |
+|------|------|
+| `LCELChainBuilder` | LCEL 链式调用构建器 |
+| `ToolBinder` | 工具自动绑定器 |
+| `EnhancedMemory` | 增强记忆管理 |
+| `LangChainRAG` | RetrievalQA 链集成 |
+| `StreamingManager` | 流式输出管理器 |
+| `LangSmithEvaluator` | LangSmith 评估器 |
+| `MultiAgentFactory` | 多 Agent 工厂 |
 
 ---
 
 ## 🎓 推荐学习路径
 
 1.  **第一步**：自测实验 **[AI Beginner Lab](./ai_beginner_lab.md)**。不要急着看理论，先进终端跑两个实验，直观感受 Agent 的流态。
-2.  **第二步**：阅读 **[架构设计概览](./architecture_overview.md)**。在动手写代码前，先理解智能体是如何“思考”和“路由”的。
+2.  **第二步**：阅读 **[架构设计概览](./architecture_overview.md)**。在动手写代码前，先理解智能体是如何"思考"和"路由"的。
 3.  **第三步**：对照 **[环境与调试指南](./getting_started_dev.md)** 配置好 `.env`，让程序在本地跑起自己的业务。
 4.  **第四步**：查阅 **[技能开发实战](./skill_development.md)**，尝试编写一个简单的 factorial 技能，观察它如何并入智能体的工具集。
 5.  **第五步**：学习 **[MCP 深度开发](./mcp_development.md)**，了解如何连接外部已有的庞大生态能力。
+6.  **第六步**：运行 **[IT 测试场景](./it_test_scenarios.md)**，验证所有功能正常工作。
+
+---
+
+## 🧪 测试指南
+
+### 运行测试
+```bash
+# 运行所有测试
+python -m pytest tests/ -v
+
+# 运行特定测试
+python -m pytest tests/test_skills.py -v
+python -m pytest tests/test_rag_enhanced.py -v
+python -m pytest tests/test_langchain_enhancements.py -v
+python -m pytest tests/test_http_mcp_client.py -v
+```
+
+### 测试覆盖
+| 测试文件 | 测试数量 |
+|----------|----------|
+| `test_skills.py` | 23 |
+| `test_http_mcp_client.py` | 9 |
+| `test_mcp_client.py` | 11 |
+| `test_rag_enhanced.py` | 16 |
+| `test_langchain_enhancements.py` | 23 |
+| **总计** | **82+** |
+
+详细测试场景请参考：[IT Test Scenarios](./it_test_scenarios.md)
 
 ---
 
 > [!TIP]
 > **关于可维护性**：
-> 这一系列文档是由智能体辅助生成的。如果你在后续开发中修改了核心组件（例如更改了数据库表结构），可以随时指令智能体：“请根据最新代码同步更新数据库架构文档”。
+> 这一系列文档是由智能体辅助生成的。如果你在后续开发中修改了核心组件（例如更改了数据库表结构），可以随时指令智能体："请根据最新代码同步更新数据库架构文档"。

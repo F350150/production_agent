@@ -1,0 +1,13 @@
+mcp_servers:
+  - name: filesystem
+    transport: stdio
+    command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "./"]
+
+  - name: fastapi_service
+    transport: http
+    url: http://localhost:8000/mcp
+    timeout: 60
+
+skills:
+  builtin_path: skills/builtin
+  custom_path: ~/my_skills
