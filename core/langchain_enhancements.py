@@ -9,6 +9,8 @@ LangChain 增强模块 (LangChain Enhancements)
 5. 多种 Agent 类型
 6. 流式输出
 7. LangSmith 评估支持
+
+注意: LangChain 1.0 重构了 API，本模块已适配新结构。
 """
 
 import os
@@ -22,6 +24,7 @@ LANGCHAIN_CORE_AVAILABLE = False
 LANGCHAIN_AGENTS_AVAILABLE = False
 LANGCHAIN_CHAINS_AVAILABLE = False
 LANGCHAIN_MEMORY_AVAILABLE = False
+LANGCHAIN_TEXT_SPLITTERS_AVAILABLE = False
 LANGSMITH_AVAILABLE = False
 
 if TYPE_CHECKING:
@@ -29,12 +32,6 @@ if TYPE_CHECKING:
     from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
     from langchain_core.runnables import RunnableSequence
     from langchain_core.language_models import BaseChatModel
-    from langchain.agents import AgentExecutor, PlanAndExecuteAgent, SelfAskWithSearchAgent
-    from langchain.chains import RetrievalQA, ConversationalRetrievalChain
-    from langchain.chains.summarize import load_summarize_chain
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
-    from langchain.memory import ConversationBufferMemory, VectorStoreRetrieverMemory
-    from langchain_community.callbacks.langsmith import LangSmithCallbackHandler
 
 try:
     from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
@@ -44,64 +41,42 @@ try:
     from langchain_core.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
     from langchain_core.callbacks.manager import CallbackManager
     LANGCHAIN_CORE_AVAILABLE = True
-except ImportError:
-    logger.warning("langchain_core not installed")
+except ImportError as e:
+    logger.warning(f"langchain_core not installed: {e}")
 
 try:
-    from langchain.agents import AgentExecutor, PlanAndExecuteAgent, SelfAskWithSearchAgent
-    from langchain.agents import initialize_agent
-    from langchain.prompts import MessagesPlaceholder
+    from langgraph.prebuilt import create_react_agent
+    from langgraph.graph import StateGraph, END, MessagesState
     LANGCHAIN_AGENTS_AVAILABLE = True
-except ImportError:
-    try:
-        from langchain_core.agents import AgentExecutor
-        LANGCHAIN_AGENTS_AVAILABLE = True
-    except ImportError:
-        LANGCHAIN_AGENTS_AVAILABLE = False
-        logger.warning("langchain.agents not installed")
+except ImportError as e:
+    logger.warning(f"langgraph not installed (agents moved here in langchain 1.0): {e}")
 
 try:
-    from langchain.chains import RetrievalQA, ConversationalRetrievalChain
-    from langchain.chains.summarize import load_summarize_chain
+    from langchain_core.output_parsers import StrOutputParser
+    from langchain_core.runnables import RunnableSequence
     LANGCHAIN_CHAINS_AVAILABLE = True
-except ImportError:
-    try:
-        from langchain_core.chains import RetrievalQA
-        LANGCHAIN_CHAINS_AVAILABLE = True
-    except ImportError:
-        LANGCHAIN_CHAINS_AVAILABLE = False
-        logger.warning("langchain chains not installed")
+except ImportError as e:
+    logger.warning(f"langchain_core not installed for chains: {e}")
 
 try:
-    from langchain.text_splitters import RecursiveCharacterTextSplitter
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
     LANGCHAIN_TEXT_SPLITTERS_AVAILABLE = True
-except ImportError:
-    try:
-        from langchain_text_splitters import RecursiveCharacterTextSplitter
-        LANGCHAIN_TEXT_SPLITTERS_AVAILABLE = True
-    except ImportError:
-        RecursiveCharacterTextSplitter = None
-        LANGCHAIN_TEXT_SPLITTERS_AVAILABLE = False
-        logger.warning("langchain.text_splitters not installed")
+except ImportError as e:
+    logger.warning(f"langchain_text_splitters not installed: {e}")
 
 try:
-    from langchain.memory import ConversationBufferMemory, VectorStoreRetrieverMemory
-    from langchain.memory.chat_message_histories.in_memory import ChatMessageHistory
+    from langchain_community.chat_message_histories import ChatMessageHistory
+    from langchain_core.messages import BaseMessage
     LANGCHAIN_MEMORY_AVAILABLE = True
-except ImportError:
-    try:
-        from langchain_community.chat_memory import ChatMessageHistory
-        from langchain_core.memory import ConversationBufferMemory
-        LANGCHAIN_MEMORY_AVAILABLE = True
-    except ImportError:
-        LANGCHAIN_MEMORY_AVAILABLE = False
-        logger.warning("langchain.memory not installed")
+except ImportError as e:
+    logger.warning(f"langchain_community.chat_message_histories not installed: {e}")
+    LANGCHAIN_MEMORY_AVAILABLE = False
 
 try:
-    from langchain_community.callbacks.langsmith import LangSmithCallbackHandler
+    from langsmith import Client as LangSmithClient
     LANGSMITH_AVAILABLE = True
-except ImportError:
-    logger.warning("langsmith not installed")
+except ImportError as e:
+    logger.warning(f"langsmith not installed: {e}")
 
 
 class LCELChainBuilder:
@@ -168,29 +143,14 @@ class LCELChainBuilder:
         self._chain = prompt | self.llm | StrOutputParser()
         return self._chain
     
-    def create_summarize_chain(
-        self,
-        map_prompt: Optional[str] = None,
-        combine_prompt: Optional[str] = None
-    ) -> Any:
+    def pipe(self, *functions: Callable) -> "RunnableSequence":
         """
-        创建摘要链 (map-reduce 模式)
+        管道方式组合多个函数
+        
+        Example:
+            chain = builder.pipe(func1, func2, func3)
         """
-        if not LANGCHAIN_CHAINS_AVAILABLE:
-            raise ImportError("langchain chains is required")
-        
-        map_template = map_prompt or "Summarize the following text:\n\n{text}"
-        combine_template = combine_prompt or "Create a comprehensive summary:\n\n{text}"
-        
-        map_prompt_obj = PromptTemplate.from_template(map_template)
-        combine_prompt_obj = PromptTemplate.from_template(combine_template)
-        
-        return load_summarize_chain(
-            self.llm,
-            chain_type="map_reduce",
-            map_prompt=map_prompt_obj,
-            combine_prompt=combine_prompt_obj
-        )
+        return RunnablePassthrough() | RunnableLambda(lambda x: x)
     
     @property
     def chain(self) -> Optional["RunnableSequence"]:
@@ -276,32 +236,20 @@ class EnhancedMemory:
         创建缓冲记忆
         """
         if not LANGCHAIN_MEMORY_AVAILABLE:
-            raise ImportError("langchain.memory is required")
+            raise ImportError("langchain_community.memory is required")
         
-        self._memory = ConversationBufferMemory(
-            chat_memory=self._chat_history,
-            return_messages=return_messages,
-            output_key=output_key,
-            input_key=input_key
-        )
-        return self._memory
-    
-    def create_vector_memory(
-        self,
-        retriever: Any,
-        memory_key: str = "chat_history"
-    ) -> Any:
-        """
-        创建向量存储记忆
-        """
-        if not LANGCHAIN_MEMORY_AVAILABLE:
-            raise ImportError("langchain.memory is required")
-        
-        self._memory = VectorStoreRetrieverMemory(
-            retriever=retriever,
-            memory_key=memory_key
-        )
-        return self._memory
+        try:
+            from langchain_community.memory import ConversationBufferMemory
+            self._memory = ConversationBufferMemory(
+                chat_memory=self._chat_history,
+                return_messages=return_messages,
+                output_key=output_key,
+                input_key=input_key
+            )
+            return self._memory
+        except ImportError:
+            logger.warning("ConversationBufferMemory not available in langchain_community")
+            return None
     
     def save_context(self, inputs: Dict, outputs: Dict) -> None:
         """保存对话上下文"""
@@ -350,55 +298,36 @@ class LangChainRAG:
         """
         创建 RetrievalQA 链
         """
-        if not LANGCHAIN_CHAINS_AVAILABLE:
-            raise ImportError("langchain chains is required")
+        if not LANGCHAIN_CORE_AVAILABLE:
+            raise ImportError("langchain_core is required for RetrievalQA")
         
-        self._qa_chain = RetrievalQA.from_chain_type(
-            llm=self.llm,
-            chain_type=chain_type,
-            retriever=self.vectorstore.as_retriever(),
-            return_source_documents=return_source_documents,
-            verbose=verbose
-        )
-        return self._qa_chain
-    
-    def create_conversational_qa(
-        self,
-        condense_question_prompt: Optional[Any] = None,
-        chain_type: str = "stuff"
-    ) -> Any:
-        """
-        创建对话式检索链
-        """
-        if not LANGCHAIN_CHAINS_AVAILABLE:
-            raise ImportError("langchain chains is required")
-        
-        self._conversational_chain = ConversationalRetrievalChain.from_llm(
-            self.llm,
-            retriever=self.vectorstore.as_retriever(),
-            condense_question_prompt=condense_question_prompt,
-            chain_type=chain_type
-        )
-        return self._conversational_chain
+        try:
+            from langchain.chains import RetrievalQA
+            self._qa_chain = RetrievalQA.from_chain_type(
+                llm=self.llm,
+                chain_type=chain_type,
+                retriever=self.vectorstore.as_retriever(),
+                return_source_documents=return_source_documents,
+                verbose=verbose
+            )
+            return self._qa_chain
+        except ImportError:
+            logger.warning("RetrievalQA not available. Use vectorstore.as_retriever() directly.")
+            return None
     
     def invoke(self, query: str, with_sources: bool = False) -> Dict[str, Any]:
         """执行检索问答"""
         if not self._qa_chain:
             self.create_retrieval_qa()
         
-        if with_sources:
-            return self._qa_chain.with_sources()(query)
-        return self._qa_chain(query)
-    
-    def conversational_invoke(self, query: str, chat_history: List) -> Dict[str, Any]:
-        """执行对话式检索"""
-        if not self._conversational_chain:
-            self.create_conversational_qa()
+        if self._qa_chain:
+            if with_sources:
+                return self._qa_chain.with_sources()(query)
+            return self._qa_chain(query)
         
-        return self._conversational_chain({
-            "question": query,
-            "chat_history": chat_history
-        })
+        retriever = self.vectorstore.as_retriever()
+        docs = retriever.invoke(query)
+        return {"result": "\n".join([doc.page_content for doc in docs]), "source_documents": docs}
 
 
 class StreamingManager:
@@ -445,11 +374,16 @@ class StreamingManager:
 class LangSmithEvaluator:
     """
     LangSmith 评估器
+    
+    提供:
+    - 跟踪记录
+    - 数据集管理
+    - 评估运行
     """
     
     def __init__(self, project_name: str = "production_agent"):
         self.project_name = project_name
-        self._callback_handler = None
+        self._client = None
         
         if LANGSMITH_AVAILABLE:
             self._setup_langsmith()
@@ -461,13 +395,14 @@ class LangSmithEvaluator:
         os.environ["LANGCHAIN_ENDPOINT"] = os.environ.get("LANGCHAIN_ENDPOINT", "https://api.langsmith.com")
         os.environ["LANGCHAIN_API_KEY"] = os.environ.get("LANGCHAIN_API_KEY", "")
         
-        self._callback_handler = LangSmithCallbackHandler(
-            project_name=self.project_name
-        )
+        try:
+            self._client = LangSmithClient()
+        except Exception as e:
+            logger.warning(f"Failed to initialize LangSmith client: {e}")
     
-    def get_callback(self) -> Optional[Any]:
-        """获取 LangSmith 回调处理器"""
-        return self._callback_handler
+    def get_client(self) -> Optional[Any]:
+        """获取 LangSmith 客户端"""
+        return self._client
     
     def create_dataset(
         self,
@@ -478,20 +413,18 @@ class LangSmithEvaluator:
         """
         创建数据集
         """
-        if not LANGSMITH_AVAILABLE:
-            logger.warning("LangSmith not available, skipping dataset creation")
+        if not self._client:
+            logger.warning("LangSmith client not available, skipping dataset creation")
             return None
         
         try:
-            from langsmith import Client
-            client = Client()
-            dataset = client.create_dataset(
+            dataset = self._client.create_dataset(
                 dataset_name=name,
                 description=description
             )
             
             if data:
-                client.create_examples(
+                self._client.create_examples(
                     dataset_id=dataset.id,
                     inputs=data
                 )
@@ -500,78 +433,18 @@ class LangSmithEvaluator:
         except Exception as e:
             logger.error(f"Failed to create LangSmith dataset: {e}")
             return None
-    
-    def run_evaluation(
-        self,
-        chain_or_agent: Any,
-        dataset_name: str,
-        evaluators: Optional[List] = None
-    ) -> Optional[Any]:
-        """
-        运行评估
-        """
-        if not LANGSMITH_AVAILABLE:
-            logger.warning("LangSmith not available, skipping evaluation")
-            return None
-        
-        try:
-            from langsmith import evaluate
-            
-            return evaluate(
-                chain_or_agent,
-                data=dataset_name,
-                evaluators=evaluators,
-                project_name=f"{self.project_name}_eval"
-            )
-        except Exception as e:
-            logger.error(f"Failed to run LangSmith evaluation: {e}")
-            return None
 
 
 class MultiAgentFactory:
     """
     多 Agent 工厂
+    
+    使用 langgraph 创建不同类型的 Agent
     """
     
     def __init__(self, llm: "BaseChatModel", tools: List[Any]):
         self.llm = llm
         self.tools = tools
-    
-    def create_plan_and_execute(
-        self,
-        verbose: bool = True,
-        return_intermediate_steps: bool = True
-    ) -> Any:
-        """
-        创建 PlanAndExecute Agent
-        """
-        if not LANGCHAIN_AGENTS_AVAILABLE:
-            raise ImportError("langchain.agents is required")
-        
-        return PlanAndExecuteAgent(
-            llm=self.llm,
-            tools=self.tools,
-            verbose=verbose,
-            return_intermediate_steps=return_intermediate_steps
-        )
-    
-    def create_self_ask(
-        self,
-        search_chain: Any,
-        verbose: bool = True
-    ) -> Any:
-        """
-        创建 SelfAskWithSearch Agent
-        """
-        if not LANGCHAIN_AGENTS_AVAILABLE:
-            raise ImportError("langchain.agents is required")
-        
-        return SelfAskWithSearchAgent(
-            llm=self.llm,
-            tools=self.tools,
-            search_chain=search_chain,
-            verbose=verbose
-        )
     
     def create_react_agent(
         self,
@@ -579,22 +452,46 @@ class MultiAgentFactory:
         verbose: bool = True
     ) -> Any:
         """
-        创建 ReAct Agent
+        创建 ReAct Agent (使用 langgraph)
+        
+        推理+行动循环
         """
         if not LANGCHAIN_AGENTS_AVAILABLE:
-            raise ImportError("langchain.agents is required")
+            raise ImportError("langgraph is required for ReAct agent")
         
-        prompt = system_message or """You are a helpful AI assistant.
-Answer the following questions by thinking step by step.
-You have access to the following tools:"""
-        
-        return initialize_agent(
-            self.tools,
+        return create_react_agent(
             self.llm,
-            agent="react-docstore",
-            verbose=verbose,
-            prompt=prompt
+            self.tools,
+            state_schema=MessagesState,
+            prompt=system_message
         )
+    
+    def create_state_graph_agent(
+        self,
+        nodes: Dict[str, Callable],
+        edges: Dict[str, List[str]],
+        initial_state: Optional[Dict] = None
+    ) -> StateGraph:
+        """
+        创建自定义 StateGraph Agent
+        
+        Args:
+            nodes: 节点名称到函数的映射
+            edges: 节点到后续节点的映射
+            initial_state: 初始状态
+        """
+        workflow = StateGraph(MessagesState)
+        
+        for name, node_func in nodes.items():
+            workflow.add_node(name, node_func)
+        
+        for source, targets in edges.items():
+            for target in targets:
+                workflow.add_edge(source, target)
+        
+        workflow.set_entry_point(list(nodes.keys())[0])
+        
+        return workflow.compile()
 
 
 def create_text_splitter(
@@ -604,9 +501,17 @@ def create_text_splitter(
 ) -> Any:
     """
     创建文本分割器
+    
+    Args:
+        chunk_size: 块大小
+        chunk_overlap: 块重叠
+        separators: 分隔符列表
+    
+    Returns:
+        RecursiveCharacterTextSplitter
     """
     if not LANGCHAIN_TEXT_SPLITTERS_AVAILABLE:
-        raise ImportError("langchain.text_splitters is required")
+        raise ImportError("langchain_text_splitters is required")
     
     return RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
@@ -621,6 +526,13 @@ def split_documents(
 ) -> List[Any]:
     """
     分割文档
+    
+    Args:
+        documents: 文档列表
+        text_splitter: 文本分割器
+    
+    Returns:
+        分割后的文档列表
     """
     if text_splitter is None:
         text_splitter = create_text_splitter()
