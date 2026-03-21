@@ -312,6 +312,10 @@ class TestSkillRegistry:
         """验证新添加的技能能被 SkillRegistry 发现"""
         from skills.skill_registry import SkillRegistry
 
+        SkillRegistry._instance = None
+        SkillRegistry._initialized = False
+        SkillRegistry._skills = {}
+
         registry = SkillRegistry()
         registry.initialize()
 

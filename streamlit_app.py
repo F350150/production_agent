@@ -52,10 +52,7 @@ if "session_id" not in st.session_state:
 
 if "swarm" not in st.session_state:
     swarm = SwarmOrchestrator(BUS, TODO, team_manager=team_manager, interrupt_checker=lambda: None)
-    # 使用 session_id 加载持久化上下文
-    history_dict = load_session(f"swarm_{st.session_state.session_id}")
-    if history_dict and isinstance(history_dict, dict):
-        swarm.agent_contexts = history_dict
+    # 状态由 LangGraph checkpointer 自动持久化
     st.session_state.swarm = swarm
 
 if "current_role" not in st.session_state:
@@ -148,21 +145,23 @@ if prompt := st.chat_input("Input your project requirements..."):
                 st.info(data)
 
         try:
+            import asyncio
             # 传入 session_id 作为 thread_id
-            final_role = swarm.run_swarm_loop(
+            final_role = asyncio.run(swarm.run_swarm_loop(
                 st.session_state.current_role, 
                 thread_id=st.session_state.session_id,
-                callback=swarm_callback
-            )
+                callback=swarm_callback,
+                user_message=prompt
+            ))
             st.session_state.current_role = final_role
             
-            last_agent_messages = swarm.agent_contexts.get(final_role, [])
-            assistant_responses = [m for m in last_agent_messages if isinstance(m, dict) and m.get("role") == "assistant"]
+            last_agent_messages = getattr(swarm, "latest_messages", [])
+            assistant_responses = [m for m in last_agent_messages if getattr(m, "type", "") == "ai" and not getattr(m, "tool_calls", [])]
             
             if assistant_responses:
-                last_response = assistant_responses[-1]["content"]
+                last_response = assistant_responses[-1].content
                 if isinstance(last_response, list):
-                    text_parts = [b.get("text", "") for b in last_response if isinstance(b, dict) and b.get("type") == "text"]
+                    text_parts = [b.get("text", "") for b in last_response if hasattr(b, "get") and b.get("type") == "text"]
                     full_response = "\n".join(text_parts)
                 else:
                     full_response = str(last_response)
@@ -176,7 +175,6 @@ if prompt := st.chat_input("Input your project requirements..."):
                 with st.chat_message("assistant"):
                     st.markdown(full_response)
             
-            save_session(f"swarm_{st.session_state.session_id}", swarm.agent_contexts)
             status.update(label="Workflow Complete", state="complete", expanded=False)
             
         except Exception as e:

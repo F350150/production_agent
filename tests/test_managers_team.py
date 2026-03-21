@@ -8,7 +8,8 @@ def mock_db(monkeypatch):
     monkeypatch.setattr("managers.team.get_db_conn", lambda: mock_conn)
     return mock_conn
 
-def test_team_manager_spawn_new(mock_db):
+def test_team_manager_spawn_new(mock_db, monkeypatch):
+    monkeypatch.setattr("asyncio.create_task", MagicMock())
     bus = MagicMock()
     tm = TeammateManager(bus, MagicMock())
     

@@ -1,7 +1,8 @@
 import pytest
-import json
-from unittest.mock import MagicMock, patch
+import asyncio
+from unittest.mock import MagicMock, patch, AsyncMock
 from core.swarm import SwarmOrchestrator, _serialize_content
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
 def test_serialize_content_handles_various_blocks():
     """测试 _serialize_content 对不同 Block 类型的转换"""
@@ -33,6 +34,7 @@ def test_serialize_content_handles_various_blocks():
     assert result[2] == {"type": "tool_use", "id": "t1", "name": "search", "input": {"q": "test"}}
     assert result[3] == {"type": "tool_result", "tool_use_id": "t1", "content": "result"}
 
+@pytest.mark.asyncio
 class TestSwarmOrchestrator:
     """测试 SwarmOrchestrator 编排逻辑"""
 
@@ -43,125 +45,108 @@ class TestSwarmOrchestrator:
         todo.list_all.return_value = "No tasks."
         return bus, todo
 
-    @patch("core.swarm.LLMProvider.safe_llm_call")
-    @patch("core.swarm.ToolRegistry.get_role_tools")
-    @patch("core.swarm.console")
-    def test_run_swarm_loop_handover_logic(self, mock_console, mock_get_tools, mock_llm, mock_deps):
-        """测试 Agent 之间的 Handover 交接逻辑"""
+    @pytest.fixture
+    def mock_checkpointer(self):
+        # mock AsyncSqliteSaver.from_conn_string
+        mock_saver = AsyncMock()
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__.return_value = mock_saver
+        mock_ctx.__aexit__.return_value = False
+        return mock_ctx
+
+    async def test_run_swarm_loop_handover_logic(self, mock_deps, mock_checkpointer):
+        """测试 Agent 之间的 Handover 交接逻辑 (基于 astream_events)"""
         bus, todo = mock_deps
         orch = SwarmOrchestrator(bus, todo)
         
-        # 1. 模拟 ProductManager 调用 handover_to
-        mock_response = MagicMock()
-        mock_response.stop_reason = "tool_use"
-        t_block = MagicMock()
-        t_block.type = "tool_use"
-        t_block.id = "call_1"
-        t_block.name = "handover_to"
-        t_block.input = {"role": "Architect", "msg": "PRD ready"}
-        mock_response.content = [t_block]
+        mock_app = AsyncMock()
         
-        # 2. 模拟切换到 Architect 后的第二次调用直接结束
-        mock_response_2 = MagicMock()
-        mock_response_2.stop_reason = "end_turn"
-        t2 = MagicMock()
-        t2.type = "text"
-        t2.text = "Finished"
-        mock_response_2.content = [t2]
+        # 模拟事件流，反映角色流转
+        async def mock_astream_events(*args, **kwargs):
+            yield {"event": "on_chain_start", "name": "ProductManager"}
+            yield {"event": "on_tool_start", "name": "transfer_to_Architect", "data": {"input": {"msg": "PRD ready"}}}
+            yield {"event": "on_chain_start", "name": "Architect"}
+            
+        mock_app.astream_events = mock_astream_events
         
-        mock_llm.side_effect = [mock_response, mock_response_2]
-        mock_get_tools.return_value = [{"name": "handover_to"}]
+        # 模拟最终状态
+        mock_state = AsyncMock()
+        mock_state.next = []
+        mock_state.values = {"messages": [AIMessage(content="Finished")]}
+        mock_app.aget_state.return_value = mock_state
         
-        # 定义 handover handler
-        def handover_handler(role, msg):
-            return f"__HANDOVER_SIGNAL__::{role}::{msg}"
-        orch.handlers = {"handover_to": handover_handler}
-        
-        orch.inject_user_message("ProductManager", "Start")
-        final_role = orch.run_swarm_loop("ProductManager")
-        
-        # 应该发生了交接，最终停在 Architect
-        assert final_role == "Architect"
-        bus.send.assert_called_once_with(sender="ProductManager", recipient="Architect", content="PRD ready", msg_type="handover")
+        with patch.object(orch._app_uncompiled, "compile", return_value=mock_app), \
+             patch("core.swarm.AsyncSqliteSaver.from_conn_string", return_value=mock_checkpointer):
+            
+            final_role = await orch.run_swarm_loop("ProductManager", user_message="Start")
+            
+            # 由于 on_chain_start 触发了 Architect，最终角色应更新
+            assert final_role == "Architect"
 
-    @patch("core.swarm.LLMProvider.safe_llm_call")
-    @patch("core.swarm.console")
-    def test_run_swarm_loop_safety_guard_denied(self, mock_console, mock_llm, mock_deps):
-        """测试破坏性工具被用户拒绝执行"""
+    @patch("core.swarm.asyncio.to_thread", new_callable=AsyncMock)
+    @patch("core.swarm.GOVERNANCE", {"dangerous_tools": ["rm_rf"]})
+    async def test_run_swarm_loop_safety_guard_denied(self, mock_to_thread, mock_deps, mock_checkpointer):
+        """测试破坏性工具被用户拒绝执行 (Human-in-the-loop)"""
         bus, todo = mock_deps
         orch = SwarmOrchestrator(bus, todo)
         
-        with patch("core.swarm.ToolRegistry.get_role_tools") as mock_get_tools:
-            mock_get_tools.return_value = [{"name": "rm_rf", "is_destructive": True}]
-            orch.handlers = {"rm_rf": MagicMock()}
+        # 模拟用户拒绝
+        mock_to_thread.return_value = "n"
+        
+        mock_app = AsyncMock()
+        
+        async def mock_astream_events(*args, **kwargs):
+            yield {"event": "on_chain_start", "name": "ProductManager"}
             
-            mock_response = MagicMock()
-            mock_response.stop_reason = "tool_use"
-            t_block = MagicMock()
-            t_block.type = "tool_use"
-            t_block.id = "c1"
-            t_block.name = "rm_rf"
-            t_block.input = {}
-            mock_response.content = [t_block]
+        mock_app.astream_events = mock_astream_events
+        
+        # 模拟中间状态：触发了危险工具并被挂起 (state.next != [])
+        mock_state = MagicMock()
+        mock_state.next = ["ProductManager"]
+        msg = AIMessage(content="", tool_calls=[{"name": "rm_rf", "args": {}, "id": "call_123"}])
+        mock_state.values = {"messages": [msg]}
+        mock_app.aget_state.return_value = mock_state
+        
+        with patch.object(orch._app_uncompiled, "compile", return_value=mock_app), \
+             patch("core.swarm.AsyncSqliteSaver.from_conn_string", return_value=mock_checkpointer), \
+             patch("core.swarm.console.print") as mock_print:
+             
+            final_role = await orch.run_swarm_loop("ProductManager", user_message="Delete")
             
-            # 第二轮结束
-            m2 = MagicMock()
-            m2.type = "text"
-            m2.text = "ok"
-            mock_response_2 = MagicMock(stop_reason="stop", content=[m2])
-            mock_llm.side_effect = [mock_response, mock_response_2]
-            
-            mock_console.input.return_value = "n"
-            
-            # 使用 ProductManager，它不会触发 Coder/Architect 的环境注入（环境注入会覆盖 tool_result）
-            orch.inject_user_message("ProductManager", "Delete")
-            orch.run_swarm_loop("ProductManager")
-            
-            orch.handlers["rm_rf"].assert_not_called()
-            # 验证历史记录最后一条（通常是 tool_result 发回给模型的消息）
-            history = orch.agent_contexts["ProductManager"]
-            content_str = str([msg.get("content", "") for msg in history])
-            assert "denied" in content_str.lower()
+            # 因为拒绝，循环应该跳出，停留在原来的角色
+            assert final_role == "ProductManager"
+            mock_to_thread.assert_awaited_once()
+            mock_print.assert_any_call("[bold red]❌ Denied. Interaction ended.[/bold red]")
 
-    @patch("core.swarm.LLMProvider.safe_llm_call")
-    @patch("core.swarm.ToolRegistry.get_role_tools")
-    @patch("core.swarm.console")
-    @patch("tools.system_tools.SystemTools.list_files")
-    def test_run_swarm_loop_env_injection_no_overwrite(self, mock_list_files, mock_console, mock_get_tools, mock_llm, mock_deps):
-        """测试环境信息注入不会覆盖已有的 tool_result"""
+    async def test_run_swarm_loop_safety_guard_approved(self, mock_deps, mock_checkpointer):
+        """测试破坏性工具被用户同意执行"""
         bus, todo = mock_deps
         orch = SwarmOrchestrator(bus, todo)
         
-        # 模拟 Coder 角色以便触发环境注入
-        mock_get_tools.return_value = [{"name": "read_file"}]
-        orch.handlers = {"read_file": lambda path: "file content"}
-        mock_list_files.return_value = "tree output"
-        todo.list_all.return_value = "task list"
-
-        # 第一回：调用 read_file
-        t_block = MagicMock()
-        t_block.type = "tool_use"
-        t_block.id = "c1"
-        t_block.name = "read_file"
-        t_block.input = {"path": "test.txt"}
-        mock_response = MagicMock(stop_reason="tool_use", content=[t_block])
+        mock_app = AsyncMock()
         
-        # 第二回：结束
-        mock_response_2 = MagicMock(stop_reason="end_turn", content=[MagicMock(type="text", text="done")])
-        mock_llm.side_effect = [mock_response, mock_response_2]
-
-        # 注入初始消息
-        orch.inject_user_message("Coder", "Read it")
-        orch.run_swarm_loop("Coder")
-
-        # 检查上下文
-        history = orch.agent_contexts["Coder"]
+        async def mock_astream_events(*args, **kwargs):
+            yield {"event": "on_chain_start", "name": "ProductManager"}
+            
+        mock_app.astream_events = mock_astream_events
         
-        # 找到包含 tool_result 的消息
-        tool_result_msg = next(m for m in history if isinstance(m.get("content"), list) and any(b.get("type") == "tool_result" for b in m["content"]))
+        # 我们需要 aget_state 第一次返回有 next 的状态，第二次返回没有 next 的状态，跳出循环
+        mock_state_1 = MagicMock()
+        mock_state_1.next = ["ProductManager"]
+        msg = AIMessage(content="", tool_calls=[{"name": "write_file", "args": {}, "id": "call_456"}])
+        mock_state_1.values = {"messages": [msg]}
         
-        # 验证 tool_result 还在
-        assert any(b.get("type") == "tool_result" and "file content" in b.get("content") for b in tool_result_msg["content"])
-        # 验证 env info 也在
-        assert any(b.get("type") == "text" and "task list" in b.get("text") for b in tool_result_msg["content"])
-        assert any(b.get("type") == "text" and "tree output" in b.get("text") for b in tool_result_msg["content"])
+        mock_state_2 = MagicMock()
+        mock_state_2.next = []
+        mock_state_2.values = {"messages": [AIMessage(content="Done")]}
+        
+        mock_app.aget_state.side_effect = [mock_state_1, mock_state_2, mock_state_2]
+        
+        with patch.object(orch._app_uncompiled, "compile", return_value=mock_app), \
+             patch("core.swarm.AsyncSqliteSaver.from_conn_string", return_value=mock_checkpointer), \
+             patch("core.swarm.asyncio.to_thread", new_callable=AsyncMock, return_value="y"), \
+             patch("core.swarm.GOVERNANCE", {"dangerous_tools": ["write_file"]}):
+             
+            final_role = await orch.run_swarm_loop("ProductManager", user_message="Write it")
+            
+            assert final_role == "ProductManager"

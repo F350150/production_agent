@@ -1,9 +1,9 @@
 import os
 import sqlite3
-import threading
 import json
 import time
 from pathlib import Path
+from filelock import FileLock
 
 # ==============================================================================
 # 核心数据层 (Data Layer) - SQLite 数据库管理模块
@@ -103,7 +103,7 @@ def _init_db(conn):
 
 # 全局单例占位符
 _DB_CONN = None
-DB_LOCK = threading.RLock()  # 改为 RLock，允许重入执行，防止 get_db_conn 导致的死锁
+DB_LOCK = FileLock(str(DB_PATH.with_suffix('.sqlite.lock')))
 
 def get_db_conn():
     """
