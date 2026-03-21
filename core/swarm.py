@@ -177,9 +177,8 @@ class SwarmOrchestrator:
         # 构建 Swarm 应用 (未编译，在 run 阶段绑定 checkpointer)
         self._app_uncompiled = self._build_swarm()
 
-        # 兼容旧版：保留 agent_contexts 用于 session 持久化
-        self.agent_contexts = {}
         self.current_role = "ProductManager"
+        self.latest_messages = []
 
     def _build_swarm(self):
         """
@@ -263,41 +262,60 @@ class SwarmOrchestrator:
         from langgraph.graph import END
         def agent_router(state: SwarmState):
             messages = state.get("messages", [])
+            active_agent = state.get("active_agent", "ProductManager")
             if not messages:
                 return END
             
             last_msg = messages[-1]
             
             # 1. 检测工具执行错误 -> 进入诊断自愈
-            content_str = str(last_msg.content).lower()
-            if last_msg.type == "tool" and ("error:" in content_str or "stderr" in content_str or "failed" in content_str or "not found" in content_str):
-                return "diagnoser"
+            if last_msg.type == "tool":
+                is_error_status = getattr(last_msg, "status", "") == "error"
+                content_str = str(last_msg.content)
+                if is_error_status or content_str.startswith("Error:") or content_str.startswith("Exception:"):
+                    return "diagnoser"
             
             # 2. 检测接力棒移交 (handoff)
-            # langgraph-swarm 的 handoff 工具会产生一个带 artifact 的 AIMessage
-            # 也会更新 state["active_agent"]。
-            # 如果 last_msg 是 AIMessage 且包含 tool_calls 指向 handoff 工具，
-            # 说明它想移交。我们需要去 summarizer 记录这一行为并路由。
             if isinstance(last_msg, AIMessage) and last_msg.tool_calls:
-                # 检查是否是 handoff 调用
                 if any(tc.get("name", "").startswith("transfer_to_") for tc in last_msg.tool_calls):
                     return "summarizer"
-                # 如果有其他工具调用，说明还没完，继续让 agent 跑工具 (LangGraph 会处理这些)
-                # 注意：这里如果返回 END 会导致中断，所以需要谨慎
+                # 其他工具调用 -> LangGraph 内部会继续处理
             
-            # 3. 如果是普通文本回复 -> 结束流程并返回给用户
-            # 在单智能体 ReAct loop 结束后，如果最后是 AIMessage 且没有 tool_calls，即为最终答复。
+            # 3. 如果是普通文本回复 -> 检查是否真的有有效内容才结束
+            # 关键修复：防止 agent 刚完成工具调用（如 web_search）后，
+            # 生成空或很短的 AIMessage 就被误判为"最终答复"
             if isinstance(last_msg, AIMessage) and not last_msg.tool_calls:
-                return END
+                content = last_msg.content if hasattr(last_msg, 'content') else ""
+                content_str = str(content).strip() if content else ""
+                
+                # 检查最近消息中是否有 tool_result（说明刚执行完工具）
+                has_preceding_tool_result = any(
+                    getattr(m, 'type', '') == 'tool' 
+                    for m in messages[-5:-1]
+                )
+                
+                # 关键修复：如果刚执行完工具但 AI 回复太短（< 50 字），
+                # 路由回 active_agent 强制它重新处理工具结果并生成完整总结。
+                # 之前路由到 summarizer 只会压缩上下文，不会让 agent 生成新回复。
+                if has_preceding_tool_result and (not content_str or len(content_str) < 50):
+                    logger.info(f"Post-tool reply too short ({len(content_str)} chars). Routing back to {active_agent} for analysis.")
+                    return active_agent
+                
+                if content_str and len(content_str) >= 10:
+                    return END
             
             # 默认兜底：回 summarizer 检查
             return "summarizer"
 
+        # path_map 必须包含所有可能的路由目标（包括各角色名，用于 post-tool 回路由）
+        all_destinations = {r: r for r in role_names}
+        all_destinations.update({"diagnoser": "diagnoser", "summarizer": "summarizer", END: END})
+        
         for role in role_names:
             builder.add_conditional_edges(
                 role, 
                 agent_router, 
-                {"diagnoser": "diagnoser", "summarizer": "summarizer", END: END}
+                all_destinations
             )
         
         # 诊断完成后回主流程
@@ -327,17 +345,8 @@ class SwarmOrchestrator:
             content=message,
             msg_type="message"
         )
-        
-        # 2. 同步到内存上下文 (实时执行需要)
-        if role not in self.agent_contexts:
-            self.agent_contexts[role] = []
-        
-        self.agent_contexts[role].append({
-            "role": "user",
-            "content": message
-        })
 
-    async def run_swarm_loop(self, starting_role: str = "ProductManager", thread_id: str = "swarm_main", callback: Callable = None):
+    async def run_swarm_loop(self, starting_role: str = "ProductManager", thread_id: str = "swarm_main", callback: Callable = None, user_message: str = None):
         """
         执行 Swarm 编排循环 (异步版本)
 
@@ -349,19 +358,11 @@ class SwarmOrchestrator:
         """
         self.callback = callback
 
-        # 获取最近一条用户消息
-        user_messages = self.agent_contexts.get(starting_role, [])
-        if not user_messages:
-            return starting_role
-
-        last_user_msg = user_messages[-1]
-        if isinstance(last_user_msg, dict):
-            content = last_user_msg.get("content", "")
-        else:
-            content = str(last_user_msg)
-
         # 构建 LangGraph 输入
-        input_msg = {"messages": [HumanMessage(content=content)]}
+        input_msg = None
+        if user_message:
+            input_msg = {"messages": [HumanMessage(content=user_message)]}
+
         config = {
             "configurable": {"thread_id": thread_id},
             "recursion_limit": 50,  # 替代原来的熔断器
@@ -381,6 +382,7 @@ class SwarmOrchestrator:
                 
                 final_role = starting_role
                 current_tool_call = None
+                _streamed_response = False  # 追踪是否有实质性文本被流式输出
 
                 # astream_events 支持追踪 LangChain 底层的 Token 流
                 async for event in app.astream_events(input_msg, config=config, version="v2"):
@@ -402,6 +404,8 @@ class SwarmOrchestrator:
                             if isinstance(chunk.content, str):
                                 # 使用基础 print 实现不换行打字机效果
                                 print(chunk.content, end="", flush=True)
+                                if len(chunk.content.strip()) > 0:
+                                    _streamed_response = True
                                 
                     # LLM 生成工具调用意图
                     elif kind == "on_tool_start" and not name.startswith("_"):
@@ -411,15 +415,17 @@ class SwarmOrchestrator:
                         console.print(f"\n  [bold white]> {name}[/bold white]: [dim]{input_str}...[/dim]")
                         if callback:
                             callback("tool_use", {"name": name, "input": inputs})
+                        # 工具开始后，重置流式标记（下一轮回复需要重新追踪）
+                        _streamed_response = False
 
                     # 工具执行结束返回结果
                     elif kind == "on_tool_end" and not name.startswith("_"):
                         output = event["data"].get("output", "")
-                        result_preview = str(output)[:200]
+                        result_preview = str(output)[:500]
                         if result_preview:
                             console.print(f"  [dim]  ↳ {result_preview}...[/dim]")
                         if callback and isinstance(output, str):
-                            callback("tool_result", {"output": str(output)[:300]})
+                            callback("tool_result", {"output": str(output)[:800]})
 
                 # 换行收尾
                 print()
@@ -446,7 +452,8 @@ class SwarmOrchestrator:
                     
                     if is_dangerous:
                         console.print(f"\n[bold red]❗ Security Stop: Agent is attempting dangerous operation: {', '.join(tool_names)}[/bold red]")
-                        choice = input("\033[93mApprove execution? [Y/n]: \033[0m").strip().lower()
+                        choice = await asyncio.to_thread(input, "\033[93mApprove execution? [Y/n]: \033[0m")
+                        choice = choice.strip().lower()
                         if choice == 'n':
                             console.print("[bold red]❌ Denied. Interaction ended.[/bold red]")
                             break
@@ -467,9 +474,12 @@ class SwarmOrchestrator:
                             chunk = event["data"]["chunk"]
                             if hasattr(chunk, "content") and isinstance(chunk.content, str):
                                 print(chunk.content, end="", flush=True)
+                                if len(chunk.content.strip()) > 0:
+                                    _streamed_response = True
                         elif kind == "on_tool_start" and not name.startswith("_"):
                             inputs = event["data"].get("input", {})
                             console.print(f"\n  [bold white]> {name}[/bold white]: [dim]{str(inputs)[:150]}...[/dim]")
+                            _streamed_response = False
                         elif kind == "on_tool_end" and not name.startswith("_"):
                             output = event["data"].get("output", "")
                             result_preview = str(output)[:200]
@@ -481,20 +491,32 @@ class SwarmOrchestrator:
                 
                 print()
 
-                # 获取最终状态并更新 agent_contexts
+                # 获取最终状态
                 final_state = await app.aget_state(config)
                 if final_state and final_state.values:
                     final_messages = final_state.values.get("messages", [])
-                    # 提取最终的 AI 响应用于兼容旧版 session 持久化
-                    for msg in reversed(final_messages):
-                        if isinstance(msg, AIMessage) and msg.content:
-                            if final_role not in self.agent_contexts:
-                                self.agent_contexts[final_role] = []
-                            self.agent_contexts[final_role].append({
-                                "role": "assistant",
-                                "content": msg.content
-                            })
-                            break
+                    self.latest_messages = final_messages
+
+                    # ====== 关键修复：兜底显示最终 AI 回复 ======
+                    # 如果流式输出未捕获到实质性文本（常见于 interrupt_after 导致的中断边界、
+                    # 或 create_react_agent 子图内部事件不被外层 astream_events 暴露的情况），
+                    # 我们从 final_state 提取最后一条 AIMessage 并手动渲染。
+                    if not _streamed_response and final_messages:
+                        from rich.markdown import Markdown
+                        for msg in reversed(final_messages):
+                            if isinstance(msg, AIMessage) and msg.content and not msg.tool_calls:
+                                content = msg.content
+                                if isinstance(content, list):
+                                    text_parts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+                                    content = "\n".join(text_parts)
+                                content = str(content).strip()
+                                if content and len(content) > 10:
+                                    console.print()
+                                    console.rule(f"[bold magenta]{final_role} Response")
+                                    console.print(Markdown(content))
+                                    console.rule()
+                                    console.print()
+                                break
                     
                     # Record trajectory for LoRA fine-tuning
                     if final_messages:
@@ -552,10 +574,18 @@ def _serialize_content(content):
                     "input": getattr(block, "input", {})
                 })
             elif block.type == "tool_result":
+                tool_content = getattr(block, "content", "")
+                if isinstance(tool_content, list):
+                    tool_content = _serialize_content(tool_content)
                 serialized.append({
                     "type": "tool_result",
                     "tool_use_id": getattr(block, "tool_use_id", ""),
-                    "content": getattr(block, "content", "")
+                    "content": tool_content
+                })
+            elif block.type == "image":
+                serialized.append({
+                    "type": "image",
+                    "source": getattr(block, "source", {})
                 })
             else:
                 try:

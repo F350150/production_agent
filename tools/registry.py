@@ -21,6 +21,10 @@ from .web_tools import WebTools
 from .docker_tools import DockerTools
 from .playwright_tools import PlaywrightTools
 from .computer_tools import ComputerTools
+from .git_tools import GitTools
+from .db_tools import DatabaseTools
+from .docker_manager import DockerManager
+from .notify_tools import NotifyTools
 from .mcp_registry import mcp_registry
 from skills.skill_registry import skill_registry
 
@@ -195,6 +199,12 @@ async def browser_screenshot() -> dict:
     return await asyncio.to_thread(PlaywrightTools.browser_screenshot)
 
 @tool
+async def browser_full_screenshot() -> dict:
+    """Capture full page screenshot including scrollable content."""
+    import asyncio
+    return await asyncio.to_thread(PlaywrightTools.browser_full_screenshot)
+
+@tool
 async def browser_click(selector: str) -> str:
     """Click an element on the page using a CSS selector."""
     import asyncio
@@ -212,6 +222,66 @@ async def browser_scroll(direction: str = "down") -> str:
     import asyncio
     return await asyncio.to_thread(PlaywrightTools.browser_scroll, direction)
 
+@tool
+async def browser_new_tab(url: str = "") -> str:
+    """Open a new browser tab, optionally navigating to a URL."""
+    import asyncio
+    return await asyncio.to_thread(PlaywrightTools.browser_new_tab, url)
+
+@tool
+async def browser_switch_tab(index: int) -> str:
+    """Switch to a browser tab by index (0-based)."""
+    import asyncio
+    return await asyncio.to_thread(PlaywrightTools.browser_switch_tab, index)
+
+@tool
+async def browser_close_tab(index: int = -1) -> str:
+    """Close a browser tab. -1 closes current tab."""
+    import asyncio
+    return await asyncio.to_thread(PlaywrightTools.browser_close_tab, index)
+
+@tool
+async def browser_list_tabs() -> str:
+    """List all open browser tabs with titles and URLs."""
+    import asyncio
+    return await asyncio.to_thread(PlaywrightTools.browser_list_tabs)
+
+@tool
+async def browser_fill_form(fields_json: str) -> str:
+    """Fill multiple form fields. fields_json: '{"#username": "admin", "#password": "123"}'"""
+    import asyncio
+    return await asyncio.to_thread(PlaywrightTools.browser_fill_form, fields_json)
+
+@tool
+async def browser_get_text(selector: str = "body") -> str:
+    """Get plain text content of a page element. Default: entire body."""
+    import asyncio
+    return await asyncio.to_thread(PlaywrightTools.browser_get_text, selector)
+
+@tool
+async def browser_save_cookies(path: str = "/tmp/browser_cookies.json") -> str:
+    """Save browser cookies to file for session persistence."""
+    import asyncio
+    return await asyncio.to_thread(PlaywrightTools.browser_save_cookies, path)
+
+@tool
+async def browser_load_cookies(path: str = "/tmp/browser_cookies.json") -> str:
+    """Load cookies from file to restore login session."""
+    import asyncio
+    return await asyncio.to_thread(PlaywrightTools.browser_load_cookies, path)
+
+@tool
+async def browser_download(url: str, save_path: str = "/tmp/") -> str:
+    """Download a file from URL to local path."""
+    import asyncio
+    return await asyncio.to_thread(PlaywrightTools.browser_download, url, save_path)
+
+@tool
+async def browser_pdf_extract(url: str) -> str:
+    """Open a PDF URL and extract text content."""
+    import asyncio
+    return await asyncio.to_thread(PlaywrightTools.browser_pdf_extract, url)
+
 
 # --- Computer Use 工具 ---
 
@@ -221,22 +291,181 @@ def computer_screenshot() -> dict:
     return ComputerTools.screenshot()
 
 @tool
+def screenshot_region(x: int, y: int, width: int, height: int) -> dict:
+    """Capture a specific region of the screen (x, y, width, height). Use for targeted screenshot to save tokens."""
+    return ComputerTools.screenshot_region(x, y, width, height)
+
+@tool
+def ocr_screen(region: str = "") -> str:
+    """OCR the screen to extract text. Works even if LLM doesn't support vision. region format: 'x,y,w,h' or empty for fullscreen."""
+    return ComputerTools.ocr_screen(region if region else None)
+
+@tool
+def screen_record(duration: int = 3, fps: int = 4) -> str:
+    """Record screen as GIF animation. duration: seconds (max 10), fps: frames per second (max 8). Returns file path."""
+    return ComputerTools.screen_record(duration, fps)
+
+@tool
 def mouse_move(x: int, y: int) -> str:
     """Move the system mouse to (x, y) coordinates."""
     return ComputerTools.mouse_move(x, y)
 
 @tool
 def mouse_click(button: str = "left") -> str:
-    """Click the mouse at current position."""
+    """Click the mouse at current position. button: left/right/middle."""
     return ComputerTools.mouse_click(button)
+
+@tool
+def mouse_double_click(x: int = -1, y: int = -1) -> str:
+    """Double-click the mouse. Specify (x, y) or use (-1, -1) for current position."""
+    return ComputerTools.mouse_double_click(x if x >= 0 else None, y if y >= 0 else None)
+
+@tool
+def mouse_drag(x1: int, y1: int, x2: int, y2: int) -> str:
+    """Drag from (x1, y1) to (x2, y2). Useful for moving files, resizing windows."""
+    return ComputerTools.mouse_drag(x1, y1, x2, y2)
+
+@tool
+def mouse_scroll(clicks: int = -3) -> str:
+    """Scroll mouse wheel. Positive = up, negative = down."""
+    return ComputerTools.mouse_scroll(clicks)
 
 @tool
 def key_type(text: str) -> str:
     """Type text into the current system focus."""
     return ComputerTools.key_type(text)
 
+@tool
+def key_combo(keys: str) -> str:
+    """Execute keyboard shortcut. Format: 'cmd+c', 'ctrl+shift+f', 'alt+tab'. Supports: cmd, ctrl, alt, shift, enter, esc, tab, space, etc."""
+    return ComputerTools.key_combo(keys)
 
-# --- 上下文管理工具 ---
+
+# --- Git 版本控制工具 ---
+
+@tool
+def git_status() -> str:
+    """Show current git repository status (modified/staged/untracked files)."""
+    return GitTools.status()
+
+@tool
+def git_diff(file: str = "", staged: bool = False) -> str:
+    """Show file changes diff. file: optional specific file. staged: only staged changes."""
+    return GitTools.diff(file, staged)
+
+@tool
+def git_log(n: int = 10) -> str:
+    """Show last N git commits."""
+    return GitTools.log(n)
+
+@tool
+def git_blame(file: str, start_line: int = 1, end_line: int = 50) -> str:
+    """Show line-by-line authorship for a file (who changed what and when)."""
+    return GitTools.blame(file, start_line, end_line)
+
+@tool
+def git_commit(message: str, add_all: bool = True) -> str:
+    """Commit changes to git. add_all: whether to 'git add -A' first."""
+    return GitTools.commit(message, add_all)
+
+@tool
+def git_create_branch(branch_name: str) -> str:
+    """Create and switch to a new git branch."""
+    return GitTools.create_branch(branch_name)
+
+@tool
+def git_create_pr(title: str, body: str = "") -> str:
+    """Create a GitHub Pull Request using gh CLI."""
+    return GitTools.create_pr(title, body)
+
+
+# --- 数据库工具 ---
+
+@tool
+def db_connect(uri: str, alias: str = "default") -> str:
+    """Connect to a database. uri examples: 'sqlite:///test.db', 'postgresql://user:pass@host/db'."""
+    return DatabaseTools.connect(uri, alias)
+
+@tool
+def db_query(sql: str, alias: str = "default") -> str:
+    """Execute SQL query and return results as table."""
+    return DatabaseTools.query(sql, alias)
+
+@tool
+def db_schema(table: str = "", alias: str = "default") -> str:
+    """Inspect database schema. Empty table = list all tables."""
+    return DatabaseTools.schema(table, alias)
+
+@tool
+def db_explain(sql: str, alias: str = "default") -> str:
+    """Analyze SQL query execution plan for performance optimization."""
+    return DatabaseTools.explain(sql, alias)
+
+
+# --- Docker 管理工具 ---
+
+@tool
+def docker_ps(all_containers: bool = False) -> str:
+    """List Docker containers. all_containers: include stopped ones."""
+    return DockerManager.ps(all_containers)
+
+@tool
+def docker_logs(container: str, tail: int = 50) -> str:
+    """View container logs. tail: how many lines."""
+    return DockerManager.logs(container, tail)
+
+@tool
+def docker_exec(container: str, command: str) -> str:
+    """Execute a command inside a Docker container."""
+    return DockerManager.exec_cmd(container, command)
+
+@tool
+def docker_start(container: str) -> str:
+    """Start a Docker container."""
+    return DockerManager.start(container)
+
+@tool
+def docker_stop(container: str) -> str:
+    """Stop a Docker container."""
+    return DockerManager.stop(container)
+
+@tool
+def docker_compose_up(path: str = ".") -> str:
+    """Start docker-compose service stack."""
+    return DockerManager.compose_up(path)
+
+@tool
+def docker_compose_down(path: str = ".") -> str:
+    """Stop docker-compose service stack."""
+    return DockerManager.compose_down(path)
+
+@tool
+def docker_images() -> str:
+    """List local Docker images."""
+    return DockerManager.images()
+
+
+# --- 通知推送工具 ---
+
+@tool
+def notify_macos(title: str, message: str) -> str:
+    """Send macOS native notification with sound."""
+    return NotifyTools.notify_macos(title, message)
+
+@tool
+def notify_email(to: str, subject: str, body: str) -> str:
+    """Send email notification. Requires SMTP_SERVER, SMTP_USER, SMTP_PASS env vars."""
+    return NotifyTools.notify_email(to, subject, body)
+
+@tool
+def notify_webhook(url: str, message: str = "", payload: str = "") -> str:
+    """Send webhook notification to Slack/Discord/Lark. Either message or JSON payload."""
+    return NotifyTools.notify_webhook(url, payload if payload else None, message)
+
+@tool
+def notify_say(message: str, voice: str = "Samantha") -> str:
+    """macOS text-to-speech. Voice options: Samantha(EN), Ting-Ting(CN), Alex(EN)."""
+    return NotifyTools.notify_say(message, voice)
 
 @tool
 def compress() -> str:
@@ -427,8 +656,19 @@ class ToolRegistry:
             run_bash, read_file, write_file, edit_file, list_files,
             get_repo_map, index_codebase, semantic_search_code,
             web_search, fetch_url, sandbox_bash,
-            browser_open, browser_screenshot, browser_click, browser_type, browser_scroll,
-            computer_screenshot, mouse_move, mouse_click, key_type,
+            browser_open, browser_screenshot, browser_full_screenshot,
+            browser_click, browser_type, browser_scroll,
+            browser_new_tab, browser_switch_tab, browser_close_tab, browser_list_tabs,
+            browser_fill_form, browser_get_text,
+            browser_save_cookies, browser_load_cookies, browser_download, browser_pdf_extract,
+            computer_screenshot, screenshot_region, ocr_screen, screen_record,
+            mouse_move, mouse_click, mouse_double_click, mouse_drag, mouse_scroll,
+            key_type, key_combo,
+            git_status, git_diff, git_log, git_blame, git_commit, git_create_branch, git_create_pr,
+            db_connect, db_query, db_schema, db_explain,
+            docker_ps, docker_logs, docker_exec, docker_start, docker_stop,
+            docker_compose_up, docker_compose_down, docker_images,
+            notify_macos, notify_email, notify_webhook, notify_say,
             compress, use_skill,
         ]
 

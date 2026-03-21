@@ -36,6 +36,18 @@
 | :--- | :--- | :--- |
 | [🧪 IT 测试场景](./it_test_scenarios.md) | MCP、Skill、RAG 完整集成测试场景。 | *必读：验证功能正确性* |
 
+### 🔴 第五阶段：Computer Use 与全工具矩阵
+| 能力层 | 工具 | 数量 |
+|--------|------|------|
+| 视觉感知 | 全屏/区域截图、OCR 文字识别、GIF 录屏 | 4 |
+| 鼠标操控 | 移动、单击、双击、拖拽、滚轮 | 5 |
+| 键盘操控 | 文本输入、快捷键组合 | 2 |
+| 浏览器自动化 | 打开/截图/点击/多标签/表单/Cookie/PDF | 16 |
+| Git 版本控制 | status/diff/log/blame/commit/branch/PR | 7 |
+| 数据库操作 | connect/query/schema/explain | 4 |
+| Docker 管理 | ps/logs/exec/start/stop/compose | 8 |
+| 通知推送 | macOS 通知、邮件、Webhook、语音 | 4 |
+
 ---
 
 ## 🆕 最新功能指南 (New Features)
@@ -74,6 +86,33 @@ mcp_servers:
 | `code_migration` | `use_skill("code_migration", {"target": "path/to/file.py", "migration_type": "flask_to_fastapi"})` | 代码框架迁移 |
 
 详细使用请参考：[技能开发实战](./skill_development.md)
+
+### Computer Use 视觉感知
+实现 Anthropic Computer Use 范式，允许 Agent 感知和操控计算机界面：
+
+```
+# 测试示例
+Lead Agent >> 截取当前屏幕，告诉我桌面上有什么应用
+  → Coder: computer_screenshot() → 图像分析
+
+Lead Agent >> 用 OCR 识别屏幕上的文字
+  → Coder: ocr_screen() → 纯文本返回
+
+Lead Agent >> 执行快捷键 cmd+space
+  → Coder: key_combo("cmd+space") → 系统响应
+```
+
+### 工具集成（Git / 数据库 / Docker / 通知）
+```
+Lead Agent >> 查看最近 5 次 git 提交
+  → Coder: git_log(5)
+
+Lead Agent >> 连接数据库查看有哪些表
+  → Coder: db_connect("sqlite:///...") + db_schema()
+
+Lead Agent >> 完成后发个 macOS 通知
+  → Coder: notify_macos("完成", "任务已结束")
+```
 
 ### RAG 增强
 | 功能 | 说明 |

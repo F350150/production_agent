@@ -101,11 +101,6 @@ def cleanup(swarm=None):
     """
     print("\n[bold blue]Finalizing resources...[/bold blue]")
     try:
-        # 1. 保存当前会话
-        if swarm and hasattr(swarm, 'agent_contexts'):
-            save_session("swarm_modular", swarm.agent_contexts)
-            print("\033[90m[Session saved]\033[0m")
-        
         # 2. 持久化交互历史
         readline.write_history_file(str(HISTORY_FILE))
         print("\033[90m[History saved]\033[0m")
@@ -174,14 +169,16 @@ async def main():
                         from core import TEAM as team_manager
 
                         swarm = SwarmOrchestrator(BUS, TODO, team_manager=team_manager, interrupt_checker=_check_interrupt)
-                        history_dict = load_session("swarm_modular")
-                        if history_dict and isinstance(history_dict, dict):
-                            swarm.agent_contexts = history_dict
+                        # 每个新 session 使用唯一的 thread_id，确保 checkpoint 互不干扰
+                        import uuid
+                        session_thread_id = f"swarm_{uuid.uuid4().hex[:8]}"
 
                 if query.strip() == "/clear":
                     clear_session("swarm_modular")
                     from core import TEAM as team_manager
                     swarm = SwarmOrchestrator(BUS, TODO, team_manager=team_manager, interrupt_checker=_check_interrupt)
+                    import uuid
+                    session_thread_id = f"swarm_{uuid.uuid4().hex[:8]}"
                     print("\033[33m[Session successfully cleared. Starting fresh.]\033[0m")
                     continue
 
@@ -204,32 +201,13 @@ async def main():
 
                 try:
                     # 开始由引擎接管，执行并发异步循环。
-                    final_role = await swarm.run_swarm_loop("ProductManager")
+                    final_role = await swarm.run_swarm_loop("ProductManager", thread_id=session_thread_id, user_message=query)
 
-                    # 显示最终的 AI 响应
-                    from rich.markdown import Markdown
-                    role_msgs = swarm.agent_contexts.get(final_role, [])
-                    assistant_msgs = [m for m in role_msgs if isinstance(m, dict) and m.get("role") == "assistant"]
-                    if assistant_msgs:
-                        last_content = assistant_msgs[-1].get("content", "")
-                        if isinstance(last_content, list):
-                            text_parts = [b.get("text", "") for b in last_content if isinstance(b, dict) and b.get("type") == "text"]
-                            last_content = "\n".join(text_parts)
-                        if last_content:
-                            console.print()
-                            console.rule(f"[bold magenta]{final_role} Response")
-                            console.print(Markdown(str(last_content)))
-                            console.rule()
-                            console.print()
-
+                    # 不再依赖 agent_contexts，直接信任终端流式输出
                     console.print(f"\n[dim][{final_role}] Yielding back to user.[/dim]")
                 except (InterruptedError, KeyboardInterrupt):
                     # 无论是自定义拦截还是直接 Ctrl+C，都在这里安全着陆并返回提示符
                     console.print("\n[bold yellow]⚠ Interaction interrupted. Returning to prompt...[/bold yellow]")
-
-                # 每聊完一轮都实时持久化
-                if swarm:
-                    save_session("swarm_modular", swarm.agent_contexts)
 
             except KeyboardInterrupt:
                 # 捕获在 input() 状态下的 Ctrl+C

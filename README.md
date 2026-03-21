@@ -19,7 +19,8 @@
 - **模块化设计**：工具发现 (MCP)、长短期记忆 (SQLite Persistence)、财务统计 (Cost Counter) 全部解耦成独立包。
 - **真实生产环境考量**：内置 Docker 沙盒、安全审批钩子 (HITL) 和全量日志追踪。
 - **MCP 多种传输协议**：支持 stdio 和 HTTP/JSON-RPC 两种传输模式，无缝连接 FastMCP 服务。
-- **开发者友好技能系统**：内置 5 个实用技能（错误诊断、测试生成、API 评审、依赖分析、代码迁移），开箱即用。
+- **77 个工具 + 8 项技能**：涵盖视觉感知、浏览器自动化、Git、数据库、Docker、通知推送等全方位能力矩阵。
+- **Computer Use 能力**：截图、OCR、鼠标键盘操控、屏幕录制，实现 Anthropic Computer Use 范式。
 
 ---
 
@@ -36,17 +37,34 @@
 | **自诊断与自愈** | 内置 `diagnoser` 节点，自动分析错误并建议修复方案 |
 | **弹性工具治理** | Docker 沙盒未启动时自动回退到本地执行 |
 | **LoRA 微调支持** | 轨迹收集器 + 一键导出 Alpaca 格式训练数据 |
+| **Computer Use** | 屏幕截图、OCR 识别、鼠标键盘操控、屏幕录制 GIF |
+| **77 工具矩阵** | 视觉 ×11 + 浏览器 ×16 + Git ×7 + DB ×4 + Docker ×8 + 通知 ×4 + 基础工具 |
 
 ---
 
 ## ✨ 最新特性 (Latest Features)
+
+### 🖥️ 全能 Computer Use（77 个工具）
+
+Agent 具备完整的计算机操控与自动化能力：
+
+| 能力层 | 工具 | 数量 |
+|--------|------|------|
+| **视觉感知** | 全屏/区域截图、OCR 文字识别、GIF 录屏 | 4 |
+| **鼠标操控** | 移动、单击、双击、拖拽、滚轮 | 5 |
+| **键盘操控** | 文本输入、快捷键组合 (`cmd+c`, `ctrl+shift+f`) | 2 |
+| **浏览器自动化** | 打开/截图/点击/输入/滚动/多标签/表单填充/Cookie/PDF | 16 |
+| **Git 版本控制** | status/diff/log/blame/commit/branch/PR | 7 |
+| **数据库操作** | connect/query/schema/explain (SQLAlchemy 多库) | 4 |
+| **Docker 管理** | ps/logs/exec/start/stop/compose up-down/images | 8 |
+| **通知推送** | macOS 通知、邮件、Webhook(Slack/Discord)、语音播报 | 4 |
 
 ### MCP HTTP 传输支持
 - ✅ `HttpMCPClient` - 支持 FastMCP HTTP/JSON-RPC 协议
 - ✅ YAML 配置 - 支持 `config/mcp_servers.yaml` 配置 MCP 服务器
 - ✅ 混合传输 - 同时支持 stdio 和 HTTP 两种 MCP 服务器
 
-### 开发者技能 (5 个新技能)
+### 开发者技能 (8 个技能)
 | 技能 | 功能 |
 |------|------|
 | `debug_explain` | 解析错误堆栈，提供修复建议 |
@@ -54,6 +72,9 @@
 | `api_design_review` | 评估 API 设计质量，检查命名和文档 |
 | `dependency_analysis` | 分析导入/调用图，检测循环依赖 |
 | `code_migration` | Flask→FastAPI、requests→httpx 等代码迁移 |
+| `web_research` | 多关键词自动搜索并汇总报告 |
+| `code_review` | 代码质量审查与建议 |
+| `narcissistic_numbers` | 数学演示技能（自恋数计算） |
 
 ### RAG 增强
 | 功能 | 说明 |
@@ -100,7 +121,10 @@
 pip install langchain langchain-anthropic langgraph langgraph-checkpoint-sqlite aiosqlite python-dotenv rich nest_asyncio
 
 # 安装进阶感知功能（推荐）
-pip install playwright pyautogui mss beautifulsoup4 duckduckgo-search docker chromadb sentence-transformers tree-sitter
+pip install playwright pyautogui Pillow pytesseract beautifulsoup4 duckduckgo-search docker chromadb sentence-transformers tree-sitter sqlalchemy requests
+
+# Playwright 浏览器引擎
+playwright install chromium
 
 # 安装 LangChain 增强组件（可选）
 pip install langgraph langsmith langchain-text-splitters
@@ -201,6 +225,16 @@ python -m pytest tests/test_langchain_enhancements.py -v
 
 ## 📝 更新日志 (Changelog)
 
+### [2026-03-22] - Phase 9: Full Feature Expansion (77 Tools)
+- **[视觉感知增强]**: 区域截图、OCR 文字识别、GIF 屏幕录制、双击/拖拽/滚轮/快捷键组合
+- **[浏览器增强]**: 多标签管理、表单填充、Cookie 保持、PDF 提取、文件下载、全页截图
+- **[Git 深度集成]**: status/diff/log/blame/commit/branch/PR 全流程工具
+- **[数据库操作]**: SQLAlchemy 多库支持（SQLite/PostgreSQL/MySQL）
+- **[Docker 管理]**: 容器生命周期管理 + docker-compose 服务编排
+- **[通知推送]**: macOS 通知、邮件、Webhook、语音播报
+- **[RBAC 增强]**: 新工具权限分配 + 危险操作 HITL 审批
+- **[路由优化]**: ProductManager 路由规则扩展至 6 类请求分类
+
 ### [2026-03-18] - Phase 8: LangChain Integration & Enhancements
 - **[MCP HTTP 支持]**: 新增 `HttpMCPClient` 支持 FastMCP HTTP/JSON-RPC 协议
 - **[MCP YAML 配置]**: 支持 `config/mcp_servers.yaml` 配置文件
@@ -236,11 +270,17 @@ production_agent/
 │   ├── context.py          # 上下文管理
 │   ├── langchain_enhancements.py  # LangChain 增强
 │   └── prompts.py          # 提示词模板
-├── tools/                   # 工具层
+├── tools/                   # 工具层 (77 个工具)
 │   ├── registry.py          # 工具注册中心
+│   ├── computer_tools.py    # Computer Use（截图/OCR/鼠标/键盘）
+│   ├── playwright_tools.py  # 浏览器自动化（Playwright）
+│   ├── git_tools.py         # Git 版本控制
+│   ├── db_tools.py          # 数据库操作（SQLAlchemy）
+│   ├── docker_manager.py    # Docker 容器管理
+│   ├── notify_tools.py      # 通知推送（macOS/邮件/Webhook/TTS）
 │   ├── mcp_client.py        # MCP 客户端 (stdio + http)
-│   ├── mcp_registry.py       # MCP 注册表
-│   ├── rag_tools.py          # RAG 工具
+│   ├── mcp_registry.py      # MCP 注册表
+│   ├── rag_tools.py         # RAG 工具
 │   └── ...
 ├── skills/                   # 技能系统
 │   ├── skill_registry.py     # 技能注册表

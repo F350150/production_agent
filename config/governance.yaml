@@ -8,6 +8,12 @@ dangerous_tools:
   - edit_file
   - delete_file
   - sandbox_bash
+  - git_commit
+  - git_create_pr
+  - docker_stop
+  - docker_exec
+  - docker_compose_up
+  - docker_compose_down
 
 # Role-Based Access Control (RBAC)
 # Define which roles can access which categories of tools.
@@ -17,11 +23,20 @@ role_permissions:
     - base_tools
     - web_search
     - fetch_url
+    - browser_open
+    - browser_screenshot
+    - notify_macos
+    - notify_say
   Architect:
     - base_tools
     - read_file
     - web_search
     - use_skill
+    - browser_open
+    - browser_screenshot
+    - git_status
+    - git_diff
+    - git_log
   Coder:
     - base_tools
     - read_file
@@ -30,6 +45,43 @@ role_permissions:
     - run_bash
     - sandbox_bash
     - use_skill
+    # 视觉感知
+    - computer_screenshot
+    - screenshot_region
+    - ocr_screen
+    - screen_record
+    - mouse_move
+    - mouse_click
+    - mouse_double_click
+    - mouse_drag
+    - mouse_scroll
+    - key_type
+    - key_combo
+    # Git
+    - git_status
+    - git_diff
+    - git_log
+    - git_blame
+    - git_commit
+    - git_create_branch
+    - git_create_pr
+    # Docker
+    - docker_ps
+    - docker_logs
+    - docker_exec
+    - docker_start
+    - docker_stop
+    - docker_compose_up
+    - docker_compose_down
+    - docker_images
+    # 数据库
+    - db_connect
+    - db_query
+    - db_schema
+    - db_explain
+    # 通知
+    - notify_macos
+    - notify_say
   QA_Reviewer:
     - base_tools
     - read_file
@@ -37,6 +89,42 @@ role_permissions:
     - sandbox_bash
     - web_search
     - use_skill
+    # 视觉感知
+    - computer_screenshot
+    - screenshot_region
+    - ocr_screen
+    - screen_record
+    - mouse_move
+    - mouse_click
+    - mouse_double_click
+    - mouse_drag
+    - mouse_scroll
+    - key_type
+    - key_combo
+    # 浏览器
+    - browser_open
+    - browser_screenshot
+    - browser_click
+    - browser_type
+    - browser_scroll
+    # Git
+    - git_status
+    - git_diff
+    - git_log
+    - git_blame
+    # Docker
+    - docker_ps
+    - docker_logs
+    # 数据库
+    - db_connect
+    - db_query
+    - db_schema
+    - db_explain
+    # 通知
+    - notify_macos
+    - notify_email
+    - notify_webhook
+    - notify_say
 
 # Sandbox Enforcement Settings
 sandbox_settings:
