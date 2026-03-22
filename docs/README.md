@@ -121,16 +121,6 @@ Lead Agent >> 完成后发个 macOS 通知
 | **BM25 索引** | 关键词索引，提升精确匹配能力 |
 | **混合搜索** | 向量相似度 + BM25 融合，提高召回率 |
 
-### LangChain 集成增强
-| 组件 | 说明 |
-|------|------|
-| `LCELChainBuilder` | LCEL 链式调用构建器 |
-| `ToolBinder` | 工具自动绑定器 |
-| `EnhancedMemory` | 增强记忆管理 |
-| `LangChainRAG` | RetrievalQA 链集成 |
-| `StreamingManager` | 流式输出管理器 |
-| `LangSmithEvaluator` | LangSmith 评估器 |
-| `MultiAgentFactory` | 多 Agent 工厂 |
 
 ---
 
@@ -155,7 +145,6 @@ python -m pytest tests/ -v
 # 运行特定测试
 python -m pytest tests/test_skills.py -v
 python -m pytest tests/test_rag_enhanced.py -v
-python -m pytest tests/test_langchain_enhancements.py -v
 python -m pytest tests/test_http_mcp_client.py -v
 ```
 
@@ -166,8 +155,7 @@ python -m pytest tests/test_http_mcp_client.py -v
 | `test_http_mcp_client.py` | 9 |
 | `test_mcp_client.py` | 11 |
 | `test_rag_enhanced.py` | 16 |
-| `test_langchain_enhancements.py` | 23 |
-| **总计** | **82+** |
+| **总计** | **59+** |
 
 详细测试场景请参考：[IT Test Scenarios](./it_test_scenarios.md)
 

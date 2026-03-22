@@ -1,13 +1,14 @@
 import pytest
 import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
-from core.swarm import SwarmOrchestrator, _serialize_content
+from core.swarm import SwarmOrchestrator
+from utils.converters import serialize_message_content
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
 def test_serialize_content_handles_various_blocks():
-    """测试 _serialize_content 对不同 Block 类型的转换"""
+    """测试 serialize_message_content 对不同 Block 类型的转换"""
     # 字符串直接返回
-    assert _serialize_content("hello") == "hello"
+    assert serialize_message_content("hello") == "hello"
     
     # 模拟 Anthropic Block 对象
     b1 = MagicMock(type="text")
@@ -27,7 +28,7 @@ def test_serialize_content_handles_various_blocks():
         b1, b2, b3
     ]
     
-    result = _serialize_content(blocks)
+    result = serialize_message_content(blocks)
     assert len(result) == 4
     assert result[0] == {"type": "text", "text": "plain dict"}
     assert result[1] == {"type": "text", "text": "mocked text"}

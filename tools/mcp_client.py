@@ -162,6 +162,8 @@ class StdioMCPClient(MCPClientBase):
     def _handshake(self):
         """发送 MCP initialize 请求完成握手"""
         # 启动一个后台线程专门消耗 stderr，防止管道撑爆导致进程死锁
+        # 如果子进程输出了大量的错误日志（stderr）而主进程不去读取，
+        # 操作系统的管道缓冲区（通常只有64KB）一旦塞满，子进程就会被操作系统彻底挂起（死锁）
         def _drain_stderr(pipe, name):
             try:
                 for line in pipe:

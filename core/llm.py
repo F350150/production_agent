@@ -6,14 +6,11 @@ core/llm.py - LLM 交互核心模块 (LangChain 1.0 重构版)
 - Token 统计与成本追踪（通过 LangChain Callback 自动化）
 - LangSmith 追踪内置（无需手动装饰器）
 - 保留流式输出的 Rich 终端渲染
-- LCEL 链式调用
-- 工具自动绑定 (bind_tools)
-- LangChain 增强集成
 """
 
 import os
 import logging
-from typing import Optional, List, Dict, Any, Callable
+from typing import Optional
 from dotenv import load_dotenv
 
 from langchain_anthropic import ChatAnthropic
@@ -22,24 +19,10 @@ try:
 except ImportError:
     ChatOpenAI = None
 from langchain_core.callbacks import BaseCallbackHandler
-from langchain_core.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
-from langchain_core.callbacks.manager import CallbackManager
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnableSequence
 
 from utils.paths import get_env_path
 from managers.database import record_token_usage
-from core.langchain_enhancements import (
-    LCELChainBuilder,
-    ToolBinder,
-    EnhancedMemory,
-    StreamingManager,
-    LangSmithEvaluator,
-    MultiAgentFactory,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -130,154 +113,3 @@ def get_llm(streaming: bool = False) -> BaseChatModel:
 # 预构建的全局实例
 llm = get_llm(streaming=False)
 llm_streaming = get_llm(streaming=True)
-
-# LangChain 增强功能
-_langchain_enhancements_available = True
-
-
-class LLMChainFactory:
-    """
-    LLM 链工厂
-    
-    提供便捷方法创建 LCEL 链
-    """
-    
-    @staticmethod
-    def create_qa_chain(
-        system_prompt: str,
-        llm_instance: Optional[BaseChatModel] = None
-    ) -> RunnableSequence:
-        """
-        创建问答链
-        
-        Args:
-            system_prompt: 系统提示
-            llm_instance: LLM 实例 (默认使用全局 llm)
-        
-        Returns:
-            LCEL RunnableSequence
-        """
-        actual_llm = llm_instance or llm
-        builder = LCELChainBuilder(actual_llm)
-        return builder.create_qa_chain(system_prompt)
-    
-    @staticmethod
-    def create_summarize_chain(
-        system_prompt: Optional[str] = None,
-        llm_instance: Optional[BaseChatModel] = None
-    ) -> Any:
-        """
-        创建摘要链
-        
-        Args:
-            system_prompt: 可选的系统提示
-            llm_instance: LLM 实例
-        
-        Returns:
-            SummarizeChain
-        """
-        actual_llm = llm_instance or llm
-        builder = LCELChainBuilder(actual_llm)
-        return builder.create_summarize_chain(map_prompt=system_prompt)
-    
-    @staticmethod
-    def create_conversation_chain(
-        system_prompt: str = "You are a helpful AI assistant.",
-        llm_instance: Optional[BaseChatModel] = None
-    ) -> RunnableSequence:
-        """
-        创建对话链
-        
-        Args:
-            system_prompt: 系统提示
-            llm_instance: LLM 实例
-        
-        Returns:
-            LCEL RunnableSequence
-        """
-        actual_llm = llm_instance or llm
-        builder = LCELChainBuilder(actual_llm)
-        return builder.create_conversation_chain(system_prompt)
-
-
-class LLM工具Binder:
-    """
-    LLM 工具绑定器
-    
-    提供 bind_tools 功能的便捷封装
-    """
-    
-    def __init__(self, llm_instance: Optional[BaseChatModel] = None):
-        self._llm = llm_instance or llm
-        self._binder = ToolBinder(self._llm)
-    
-    def bind(self, tools: List[Any], **kwargs) -> BaseChatModel:
-        """
-        绑定工具到 LLM
-        
-        Args:
-            tools: 工具列表
-            **kwargs: 额外参数
-        
-        Returns:
-            绑定后的 LLM
-        """
-        return self._binder.bind_tools(tools, **kwargs)
-    
-    def bind_as_openai_format(self, tools: List[Dict]) -> BaseChatModel:
-        """
-        以 OpenAI function calling 格式绑定工具
-        
-        Args:
-            tools: OpenAI 格式的工具定义
-        
-        Returns:
-            绑定后的 LLM
-        """
-        return self._binder.bind_tools_as_openai_format(tools)
-
-
-def get_streaming_llm() -> BaseChatModel:
-    """
-    获取支持流式输出的 LLM
-    
-    Returns:
-        配置了流式输出的 LLM 实例
-    """
-    return get_llm(streaming=True)
-
-
-def get_streaming_manager() -> StreamingManager:
-    """
-    获取流式输出管理器
-    
-    Returns:
-        StreamingManager 实例
-    """
-    return StreamingManager()
-
-
-def get_langsmith_evaluator(project_name: str = "production_agent") -> LangSmithEvaluator:
-    """
-    获取 LangSmith 评估器
-    
-    Args:
-        project_name: 项目名称
-    
-    Returns:
-        LangSmithEvaluator 实例
-    """
-    return LangSmithEvaluator(project_name)
-
-
-def create_multiagent_factory(tools: List[Any]) -> MultiAgentFactory:
-    """
-    创建多 Agent 工厂
-    
-    Args:
-        tools: 工具列表
-    
-    Returns:
-        MultiAgentFactory 实例
-    """
-    return MultiAgentFactory(llm, tools)

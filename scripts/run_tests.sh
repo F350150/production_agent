@@ -20,7 +20,7 @@ echo -e "\033[1;34m[TestRunner] 开始执行单元测试并计算覆盖率...\03
 echo -e "\033[1;36m[TestRunner] 排除有导入问题的测试文件...\033[0m"
 
 pytest tests/ \
-    --cov=tools --cov=skills --cov=core --cov=core.langchain_enhancements --cov-branch \
+    --cov=tools --cov=skills --cov=core --cov-branch \
     --cov-report=term-missing \
     --ignore=tests/test_core_llm.py \
     --ignore=tests/test_core_context.py \

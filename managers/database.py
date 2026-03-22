@@ -203,7 +203,7 @@ def close_db():
         try:
             if _DB_CONN:
                 _DB_CONN.close()
-            # print("\033[90m[Database connection closed gracefully]\033[0m")
+            print("\033[90m[Database connection closed gracefully]\033[0m")
         except Exception as e:
             import logging
             logging.getLogger(__name__).error(f"Error closing database: {e}")

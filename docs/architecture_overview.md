@@ -44,14 +44,6 @@
 -   **SkillRegistry**: 自动发现和加载内置技能。
 -   **use_skill 工具**: 统一调用接口，支持 `debug_explain`, `generate_test`, `api_design_review`, `dependency_analysis`, `code_migration` 等技能。
 
-### 6. LangChain 增强 (LangChain Enhancements) - `core/langchain_enhancements.py`
--   **LCELChainBuilder**: LCEL 链式调用构建器
--   **ToolBinder**: 工具自动绑定器
--   **EnhancedMemory**: 增强记忆管理
--   **LangChainRAG**: RetrievalQA 链集成
--   **StreamingManager**: 流式输出管理器
--   **LangSmithEvaluator**: LangSmith 评估器
--   **MultiAgentFactory**: 多 Agent 工厂
 
 ---
 

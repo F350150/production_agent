@@ -186,6 +186,23 @@ async def sandbox_bash(command: str, image: str = "python:3.11-slim") -> str:
 
 # --- Playwright 浏览器工具 ---
 
+# 大模型最终看到的根本不是你的 Python 代码，而是 @tool 自动生成的这串 JSON：
+#
+# {
+#   "name": "browser_open",
+#   "description": "Open a URL in a real browser and wait for load.",
+#   "parameters": {
+#     "type": "object",
+#     "properties": {
+#       "url": {
+#         "type": "string",
+#         "description": "The URL to open"
+#       }
+#     },
+#     "required": ["url"]
+#   }
+# }
+
 @tool
 async def browser_open(url: str) -> str:
     """Open a URL in a real browser and wait for load."""

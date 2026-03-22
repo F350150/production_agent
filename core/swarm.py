@@ -99,6 +99,14 @@ async def summarize_history(state: SwarmState):
     # 返回更新：这里 messages 的 reducer (add_messages) 会处理 RemoveMessage
     # 额外处理：确保消息列表中只有一个 SystemMessage (最前面的保留，后面的删除)
     final_messages = delete_ops + [summary_msg] + recent_messages
+
+    # 遍历新消息(合并与删除的真相)：它开始循环检查你提交的right（新消息）。
+    # 情况A（ID已存在）：如果新消息的ID在历史记录里找到了。
+    #     如果是RemoveMessage：把它加入ids_to_remove黑名单，准备删除。
+    #     如果是普通消息：直接替换 / 更新旧消息（这就是修改已有消息的原理）。
+    # 情况B（ID不存在）：说明这是一条全新的消息。
+    #     如果是RemoveMessage：报错ValueError（试图删除一条不存在的消息）。
+    #     如果是普通消息：追加(Append)到列表末尾。
     
     return {
         "summary": new_summary,
@@ -116,13 +124,16 @@ async def diagnose_error(state: SwarmState):
     """
     messages = state.get("messages", [])
     error_count = state.get("error_count", 0)
-    
+    # 终极杀手锏：熔断机制 (Circuit Breaker)
+    # 如果连续报错超过 3 次，放弃治疗。
     if error_count > 3:
+        # 强行塞入一条 AI 文本消息，伪装成任务完成，骗过调度员让整个图走向 END，防止 API 费用被抽干
         return {"messages": [AIMessage(content="Self-healing failed after 3 attempts. Please check manually.")]}
         
     # 提取错误上下文
     last_tool_msg = next((m for m in reversed(messages) if m.type == "tool"), None)
     if not last_tool_msg:
+        # 大模型在胡言乱语（没调工具却报了错），没法修。直接给胡闹计数器加 1。
         return {"error_count": error_count + 1}
         
     error_text = str(last_tool_msg.content)
@@ -222,7 +233,7 @@ class SwarmOrchestrator:
         # --- 手动构建图 (使用扩展的 SwarmState) ---
         builder = StateGraph(SwarmState)
 
-        # 核心增强：所有的入口都先经过 summarizer
+        # 核心增强：所有的入口都先经过 summarizer 减少token使用
         builder.add_node("summarizer", summarize_history)
         builder.set_entry_point("summarizer")
 
@@ -274,12 +285,23 @@ class SwarmOrchestrator:
                 content_str = str(last_msg.content)
                 if is_error_status or content_str.startswith("Error:") or content_str.startswith("Exception:"):
                     return "diagnoser"
-            
-            # 2. 检测接力棒移交 (handoff)
+            # =====================================================================
+            # 2. 检测角色移交 (Handoff)
+            # 【架构意图】：拦截 Agent 发出的跨角色移交指令。
+            # 中断当前 Agent 的内部执行循环，将状态流转至 summarizer 进行上下文压缩和重新路由。
+            # =====================================================================
             if isinstance(last_msg, AIMessage) and last_msg.tool_calls:
+                # 【核心拦截逻辑】：阻止 React Agent 内部自动执行该移交工具。
+                # 强制中断当前控制流，将下一目标节点显式指定为 "summarizer" (汇总节点)。
+                #
+                # 架构考量：
+                # 1. 上下文控制：交由 summarizer 压缩前置 Agent 的对话历史，避免后续接收节点的 Token 超限。
+                # 2. 集中调度：压缩完成后，将由 summarizer_router 读取状态中更新的 active_agent 字段，实现向目标 Agent 的重新分发。
                 if any(tc.get("name", "").startswith("transfer_to_") for tc in last_msg.tool_calls):
                     return "summarizer"
-                # 其他工具调用 -> LangGraph 内部会继续处理
+                # 【注】：若未匹配到移交指令（即调用的是普通业务工具），则跳过此拦截。
+                # LangGraph 底层封装的 React Agent 将按默认逻辑接管并执行该工具，
+                # 并在其内部循环直到生成最终回复，无需在此层路由干预。
             
             # 3. 如果是普通文本回复 -> 检查是否真的有有效内容才结束
             # 关键修复：防止 agent 刚完成工具调用（如 web_search）后，
@@ -542,56 +564,3 @@ class SwarmOrchestrator:
             console.print(f"[bold red]Swarm Error: {e}[/bold red]")
             return starting_role
 
-
-# ==============================================================================
-# 兼容层：保留旧版 _serialize_content 供其他模块使用
-# ==============================================================================
-
-def _serialize_content(content):
-    """
-    将消息内容序列化为普通 dict（兼容层）
-
-    【设计意图】
-    在 LangChain 1.0 中，消息对象自带序列化能力。
-    但为了兼容尚未完全迁移的模块，保留此函数。
-    """
-    if isinstance(content, str):
-        return content
-    if not isinstance(content, list):
-        return str(content)
-    serialized = []
-    for block in content:
-        if isinstance(block, dict):
-            serialized.append(block)
-        elif hasattr(block, "type"):
-            if block.type == "text":
-                serialized.append({"type": "text", "text": getattr(block, "text", "")})
-            elif block.type == "tool_use":
-                serialized.append({
-                    "type": "tool_use",
-                    "id": getattr(block, "id", ""),
-                    "name": getattr(block, "name", ""),
-                    "input": getattr(block, "input", {})
-                })
-            elif block.type == "tool_result":
-                tool_content = getattr(block, "content", "")
-                if isinstance(tool_content, list):
-                    tool_content = _serialize_content(tool_content)
-                serialized.append({
-                    "type": "tool_result",
-                    "tool_use_id": getattr(block, "tool_use_id", ""),
-                    "content": tool_content
-                })
-            elif block.type == "image":
-                serialized.append({
-                    "type": "image",
-                    "source": getattr(block, "source", {})
-                })
-            else:
-                try:
-                    serialized.append(block.model_dump())
-                except Exception:
-                    serialized.append({"type": "text", "text": str(block)})
-        else:
-            serialized.append({"type": "text", "text": str(block)})
-    return serialized

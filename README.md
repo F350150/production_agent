@@ -83,16 +83,6 @@ Agent 具备完整的计算机操控与自动化能力：
 | **BM25 索引** | 关键词索引，提升精确匹配能力 |
 | **混合搜索** | 向量相似度 + BM25 融合，提高召回率 |
 
-### LangChain 集成增强
-| 组件 | 类/函数 |
-|------|---------|
-| LCEL 链 | `LCELChainBuilder` |
-| 工具绑定 | `ToolBinder`, `bind_tools()` |
-| 记忆管理 | `EnhancedMemory` |
-| RAG 链 | `LangChainRAG` |
-| 流式输出 | `StreamingManager` |
-| 评估支持 | `LangSmithEvaluator` |
-| 多 Agent | `MultiAgentFactory` |
 
 ---
 
@@ -205,7 +195,6 @@ python -m pytest tests/ -v
 # 运行特定测试
 python -m pytest tests/test_skills.py -v
 python -m pytest tests/test_rag_enhanced.py -v
-python -m pytest tests/test_langchain_enhancements.py -v
 ```
 
 ### 测试覆盖
@@ -215,8 +204,7 @@ python -m pytest tests/test_langchain_enhancements.py -v
 | `test_http_mcp_client.py` | 9 | HTTP MCP 和 YAML 配置测试 |
 | `test_mcp_client.py` | 11 | MCP 客户端核心测试 |
 | `test_rag_enhanced.py` | 16 | RAG 增强功能测试 |
-| `test_langchain_enhancements.py` | 23 | LangChain 增强测试 |
-| **总计** | **82+** | **80 passed, 2 skipped** |
+| **总计** | **59+** | |
 
 ### 集成测试场景
 详细集成测试场景请参考：[IT Test Scenarios](./docs/it_test_scenarios.md)
@@ -240,7 +228,7 @@ python -m pytest tests/test_langchain_enhancements.py -v
 - **[MCP YAML 配置]**: 支持 `config/mcp_servers.yaml` 配置文件
 - **[5 个新技能]**: `debug_explain`, `generate_test`, `api_design_review`, `dependency_analysis`, `code_migration`
 - **[RAG 增强]**: 语义分块、BM25 索引、混合搜索
-- **[LangChain 增强]**: `LCELChainBuilder`, `ToolBinder`, `EnhancedMemory`, `StreamingManager`, `LangSmithEvaluator`, `MultiAgentFactory`
+
 - **[单元测试]**: 80+ 测试用例，覆盖所有新功能
 
 ### [2026-03-15] - Phase 7: LoRA Fine-Tuning Integration
@@ -268,7 +256,6 @@ production_agent/
 │   ├── llm.py              # LLM 接口封装
 │   ├── swarm.py            # Swarm 多智能体编排
 │   ├── context.py          # 上下文管理
-│   ├── langchain_enhancements.py  # LangChain 增强
 │   └── prompts.py          # 提示词模板
 ├── tools/                   # 工具层 (77 个工具)
 │   ├── registry.py          # 工具注册中心
@@ -300,7 +287,6 @@ production_agent/
 ├── tests/                    # 测试
 │   ├── test_skills.py
 │   ├── test_rag_enhanced.py
-│   ├── test_langchain_enhancements.py
 │   └── ...
 ├── docs/                     # 文档
 │   ├── README.md

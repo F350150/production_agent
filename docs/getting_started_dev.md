@@ -101,7 +101,6 @@ python main.py
 # 运行特定测试
 python -m pytest tests/test_skills.py -v
 python -m pytest tests/test_rag_enhanced.py -v
-python -m pytest tests/test_langchain_enhancements.py -v
 python -m pytest tests/test_http_mcp_client.py -v
 ```
 
@@ -112,8 +111,7 @@ python -m pytest tests/test_http_mcp_client.py -v
 | `test_http_mcp_client.py` | 9 | HTTP MCP 和 YAML 配置测试 |
 | `test_mcp_client.py` | 11 | MCP 客户端核心测试 |
 | `test_rag_enhanced.py` | 16 | RAG 增强功能测试 |
-| `test_langchain_enhancements.py` | 23 | LangChain 增强测试 |
-| **总计** | **82+** | **80 passed, 2 skipped** |
+| **总计** | **59+** | |
 
 > [!WARNING]
 > **资源占用说明**：某些 MCP 服务（如浏览器驱动）可能会非常消耗资源或保持进程常驻。如果发现系统响应变慢，请通过 `ps aux | grep node` 或 `ps aux | grep python` 检查是否有僵尸进程。
