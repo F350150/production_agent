@@ -104,6 +104,7 @@ Agent 具备完整的计算机操控与自动化能力：
 ### 1. 基础要求
 - Python 3.10+
 - （推荐）Docker Desktop：用于启用原生沙盒环境 `sandbox_bash` 功能。
+- Windows 平台默认可能没有 `readline`：CLI 可正常运行，但命令历史与 Tab 补全会自动降级禁用。
 
 ### 2. 安装依赖库
 ```bash
