@@ -10,8 +10,11 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
-import readline  # noqa: F401 — 仅 import 即可让 input() 自动获得方向键历史功能 (macOS/Linux)
-import rlcompleter  # noqa: F401 — Tab 补全支持
+try:
+    import readline  # noqa: F401 — 仅 import 即可让 input() 自动获得方向键历史功能 (macOS/Linux)
+    import rlcompleter  # noqa: F401 — Tab 补全支持
+except ImportError:
+    readline = None
 from utils.paths import LOG_FILE, HISTORY_FILE
 from managers.database import get_db_conn, save_session, load_session, clear_session, print_cost_report, close_db
 from core import BUS, TODO
@@ -35,14 +38,17 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────
 # readline 历史文件：在进程间持久化命令历史
 # ─────────────────────────────────────────────────────────
-try:
-    if os.path.exists(HISTORY_FILE):
-        readline.read_history_file(str(HISTORY_FILE))
-    readline.set_history_length(500)  # 最多记住 500 条
-except (FileNotFoundError, PermissionError):
-    pass
-except Exception as e:
-    print(f"\033[90m[Warning: Failed to load history: {e}]\033[0m")
+if readline is not None:
+    try:
+        if os.path.exists(HISTORY_FILE):
+            readline.read_history_file(str(HISTORY_FILE))
+        readline.set_history_length(500)  # 最多记住 500 条
+    except (FileNotFoundError, PermissionError):
+        pass
+    except Exception as e:
+        print(f"\033[90m[Warning: Failed to load history: {e}]\033[0m")
+else:
+    print("\033[90m[Notice] readline unavailable on this platform. History/completion disabled.\033[0m")
 
 # ─────────────────────────────────────────────────────────
 # Tab 补全支持 (Completion)
@@ -57,11 +63,12 @@ def command_completer(text, state):
     else:
         return None
 
-readline.set_completer(command_completer)
-if "libedit" in readline.__doc__:
-    readline.parse_and_bind("bind ^I rl_complete")
-else:
-    readline.parse_and_bind("tab: complete")
+if readline is not None:
+    readline.set_completer(command_completer)
+    if "libedit" in readline.__doc__:
+        readline.parse_and_bind("bind ^I rl_complete")
+    else:
+        readline.parse_and_bind("tab: complete")
 
 # ─────────────────────────────────────────────────────────
 # 中断标志：用于区分 "Ctrl+C 中止当前 Agent 循环" 与 "彻底退出程序"
@@ -102,8 +109,9 @@ def cleanup(swarm=None):
     print("\n[bold blue]Finalizing resources...[/bold blue]")
     try:
         # 2. 持久化交互历史
-        readline.write_history_file(str(HISTORY_FILE))
-        print("\033[90m[History saved]\033[0m")
+        if readline is not None:
+            readline.write_history_file(str(HISTORY_FILE))
+            print("\033[90m[History saved]\033[0m")
         
         # 3. 关闭所有 MCP 后台进程
         mcp_registry.shutdown()
@@ -188,12 +196,15 @@ async def main():
 
                 if query.strip() == "/history":
                     # 打印最近 20 条命令历史
-                    length = readline.get_current_history_length()
-                    start = max(1, length - 19)
-                    hist_table = Table(title="📜 Recent Command History", show_header=False)
-                    for i in range(start, length + 1):
-                        hist_table.add_row(f"{i}", readline.get_history_item(i))
-                    console.print(hist_table)
+                    if readline is None:
+                        console.print("[dim]/history unavailable: readline is not installed on this platform.[/dim]")
+                    else:
+                        length = readline.get_current_history_length()
+                        start = max(1, length - 19)
+                        hist_table = Table(title="📜 Recent Command History", show_header=False)
+                        for i in range(start, length + 1):
+                            hist_table.add_row(f"{i}", readline.get_history_item(i))
+                        console.print(hist_table)
                     continue
 
                 # 用户正常的聊天输入送入 ProductManager (图灵拓扑流水线的起点)
