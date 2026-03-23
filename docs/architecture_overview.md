@@ -26,9 +26,9 @@
 -   **StateGraph**: 核心驱动引擎。将任务流转从硬编码 `while` 循环升级为基于状态转移的图计算。
 -   **四角色专家系统**: PM, Architect, Coder, QA_Reviewer。每个角色通过 `handoff_tool` 传递控制权。
 
-### 2. 状态与内存管理 (State & Memory) - `core/context.py` & `summarizer`
--   **SQLite Saver**: 集成了 LangGraph Checkpointer，支持非中断式的对话落盘。
--   **Summarizer 节点**: 自动检测对话长度。当 Token 成本过高时，利用 LLM 自动生成历史摘要并重置消息历史，极大提高长对话效率。
+### 2. 异步状态与内存管理 (Async State & Memory) - `core/context.py` & `summarizer`
+-   **SQLite Saver**: 集成了 LangGraph Checkpointer，使用 `aiosqlite` 实现非中断式的对话落盘。
+-   **Summarizer 节点**: 异步检测对话长度。当 Token 成本过高时，利用 LLM 自动生成历史摘要并重置消息历史，极大提高长对话效率。
 
 ### 3. 持久化层 (Persistence) - `managers/`
 -   **`database.py`**: 单例数据库助手。
@@ -65,6 +65,15 @@ graph TD
     QA[QA_Reviewer] -- "test failed" --> Coder
     QA -- "test success" --> END
 ```
+
+---
+
+## ⚡️ 异步事件驱动 (Async Event Drive)
+
+项目的实时性依赖于 LangGraph 的 `astream_events` 机制：
+1. **事件流抛出**：引擎在执行每一个 Step (Node Start, Tool End等) 时，都会异步抛出一个事件。
+2. **实时渲染处理器**：`core/swarm.py` 中的 `_process_stream_events` 协程负责捕获这些事件，并分发给对应的查表处理器进行 UI 渲染。
+3. **并发安全性**：由于整个拓扑是无锁异步的，Agent 可以在等待大模型响应的同时，通过回调更新前端状态。
 
 ---
 

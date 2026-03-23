@@ -8,8 +8,10 @@ from langgraph.graph import MessagesState, StateGraph
 from langgraph.prebuilt import create_react_agent
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langchain_core.messages import HumanMessage
+from rich.console import Console
 
 logger = logging.getLogger(__name__)
+console = Console()
 
 
 # ==============================================================================
@@ -120,6 +122,7 @@ class TeammateManager:
                 
                 self.agent_contexts[name] = final_messages
                 logger.info(f"Teammate {name} task finalized and persisted.")
+                console.print(f"\n[bold magenta]🎉 [TeammateManager] Sub-agent {name} ({role}) finished successfully and sent report to User.[/bold magenta]")
 
         except Exception as e:
             logger.error(f"Teammate {name} execution failed: {e}")
@@ -129,6 +132,7 @@ class TeammateManager:
                 content=f"### [Teammate FAILED: {name}]\nError: {e}",
                 msg_type="error"
             )
+            console.print(f"\n[bold red]❌ [TeammateManager] Sub-agent {name} FAILED: {e}[/bold red]")
 
         finally:
             # 清理：更新状态并移除 Task 引用
@@ -181,6 +185,7 @@ class TeammateManager:
         self._set_status(name, "working")
 
         logger.info(f"Teammate {name} ({role}) spawned and running in background thread")
+        console.print(f"\n[bold magenta]🚀 [TeammateManager] Successfully spawned background agent '{name}' as '{role}'[/bold magenta]")
         return f"Teammate {name} ({role}) spawned and working in background."
 
     def stop(self, name: str) -> str:

@@ -15,6 +15,7 @@
 ## 🌟 为什么选择这个项目？ (Why This Project?)
 
 对于开发者来说，这不仅仅是一个 Agent 演示，更是一个**生产级 AI 工程实践的教学范式**：
+- **全异步驱动 (Async-First)**：从核心引擎到 I/O 工具链全面采用 `async/await`，确保高并发下的极致响应速度。
 - **从传统 Loop 到图拓扑**：展示如何从繁琐的 `while True` 循环迁移到可预测、可观察的 LangGraph 状态机。
 - **模块化设计**：工具发现 (MCP)、长短期记忆 (SQLite Persistence)、财务统计 (Cost Counter) 全部解耦成独立包。
 - **真实生产环境考量**：内置 Docker 沙盒、安全审批钩子 (HITL) 和全量日志追踪。
@@ -30,9 +31,10 @@
 
 | 技术 | 说明 |
 |------|------|
+| **Asyncio Core** | 系统地基。利用 `async/await` 实现非阻塞的工具执行与状态流转 |
 | **LangChain 1.0** | 统一的 LLM 抽象层，集成了丰富的工具库与内存模型 |
 | **LangGraph Swarm** | 使用 `StateGraph` 实现多角色编排。支持 `summarizer` 节点自动压缩上下文 |
-| **MCP 传输协议** | 支持 stdio 和 HTTP/JSON-RPC 两种传输模式 |
+| **MCP 传输协议** | 基于异步 I/O 的 MCP 客户端，支持 stdio 和 HTTP 模式 |
 | **语义分块 RAG** | 基于 AST 的语义分块 + BM25 关键词索引 + 混合搜索 |
 | **自诊断与自愈** | 内置 `diagnoser` 节点，自动分析错误并建议修复方案 |
 | **弹性工具治理** | Docker 沙盒未启动时自动回退到本地执行 |
@@ -137,7 +139,14 @@ LOCAL_BASE_URL=http://localhost:8000/v1
 LOCAL_MODEL_ID=qwen-7b-lora
 ```
 
-### 4. MCP 服务器配置
+### 4. 为何采用全异步架构？ (Why Async?)
+
+在现代 Agent 开发中，单线程同步阻塞是性能最大的瓶颈。本项目全面采用 `async/await` 带来以下优势：
+- **并发工具调用**：当 Agent 需要同时调用多个 MCP 服务器或并行处理多个 RAG 检索时，异步架构能大幅降低等待时间。
+- **流式 UI 体验**：通过异步事件流 (`astream_events`)，我们实现了在终端或 Web 端实时渲染 Agent 的思维链和模型输出，即便后台正在执行复杂的 I/O 操作也不会卡顿。
+- **高效持久化**：使用 `aiosqlite` 让状态保存与业务逻辑并发执行，避免了磁盘 I/O 阻塞关键推理路径。
+
+### 5. MCP 服务器配置
 支持两种方式配置 MCP 服务器：
 
 **方式一：环境变量（JSON 数组）**

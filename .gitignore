@@ -26,3 +26,10 @@ data/
 # OS files
 .DS_Store
 Thumbs.db
+
+# lora语料
+.team/
+
+# 测试
+.coverage
+.agent_history

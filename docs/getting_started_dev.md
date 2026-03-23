@@ -63,6 +63,15 @@ skills:
 python main.py
 ```
 
+### 💡 异步开发贴士 (Async Development Tips)
+
+作为开发者，在编写工具或扩展引擎时请遵循以下原则：
+
+- **不要使用 `time.sleep()`**：这会阻塞整个事件循环，导致 UI 卡死。应使用 `await asyncio.sleep()`。
+- **使用异步 I/O 库**：由于主循环是异步的，文件操作建议使用 `anyio` 或 `aiofiles`，网络请求建议使用 `httpx` 而非 `requests`。
+- **同步代码包装**：如果必须调用现有的同步代码，请使用 `asyncio.to_thread()` 将其推入线程池执行，避免主线程挂起。
+- **调试协程**：如果怀疑有协程死锁，可以开启 `PYTHONASYNCIODEBUG=1` 环境变量。
+
 ### 启动时的关键观察点：
 - **Lazy Loading (懒加载)**：你会注意到欢迎界面弹出极快。这是因为系统在第一条消息输入前，不会初始化昂贵的 Swarm 引擎。
 - **Tool Discovery (工具发现)**：当输入第一句话后，控制台会详细列出当前已连接的 MCP 服务器及其加载的工具数量。请检查是否有 `Warning` 提示服务器连接失败。

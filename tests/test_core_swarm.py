@@ -101,12 +101,20 @@ class TestSwarmOrchestrator:
             
         mock_app.astream_events = mock_astream_events
         
-        # 模拟中间状态：触发了危险工具并被挂起 (state.next != [])
-        mock_state = MagicMock()
-        mock_state.next = ["ProductManager"]
-        msg = AIMessage(content="", tool_calls=[{"name": "rm_rf", "args": {}, "id": "call_123"}])
-        mock_state.values = {"messages": [msg]}
-        mock_app.aget_state.return_value = mock_state
+        # 模拟中间状态：触发了危险工具被挂起
+        mock_state_1 = MagicMock()
+        mock_state_1.next = ["ProductManager"]
+        mock_interrupt = MagicMock()
+        mock_interrupt.value = {"tool": "rm_rf", "args": {}, "message": "Agent 请求执行危险操作: rm_rf"}
+        mock_task = MagicMock()
+        mock_task.interrupts = [mock_interrupt]
+        mock_state_1.tasks = [mock_task]
+        
+        mock_state_2 = MagicMock()
+        mock_state_2.next = []
+        mock_state_2.tasks = []
+        
+        mock_app.aget_state.side_effect = [mock_state_1, mock_state_2, mock_state_2]
         
         with patch.object(orch._app_uncompiled, "compile", return_value=mock_app), \
              patch("core.swarm.AsyncSqliteSaver.from_conn_string", return_value=mock_checkpointer), \
@@ -114,7 +122,7 @@ class TestSwarmOrchestrator:
              
             final_role = await orch.run_swarm_loop("ProductManager", user_message="Delete")
             
-            # 因为拒绝，循环应该跳出，停留在原来的角色
+            # 因为拒绝且挂起，外层代码退出并保留原角色
             assert final_role == "ProductManager"
             mock_to_thread.assert_awaited_once()
             mock_print.assert_any_call("[bold red]❌ Denied. Interaction ended.[/bold red]")
@@ -131,14 +139,18 @@ class TestSwarmOrchestrator:
             
         mock_app.astream_events = mock_astream_events
         
-        # 我们需要 aget_state 第一次返回有 next 的状态，第二次返回没有 next 的状态，跳出循环
+        # 我们需要 aget_state 第一次返回有 next 的状态和 interrupt，第二次返回没有 next
         mock_state_1 = MagicMock()
         mock_state_1.next = ["ProductManager"]
-        msg = AIMessage(content="", tool_calls=[{"name": "write_file", "args": {}, "id": "call_456"}])
-        mock_state_1.values = {"messages": [msg]}
+        mock_interrupt = MagicMock()
+        mock_interrupt.value = {"tool": "write_file", "args": {}, "message": "Agent 请求执行危险操作: write_file"}
+        mock_task = MagicMock()
+        mock_task.interrupts = [mock_interrupt]
+        mock_state_1.tasks = [mock_task]
         
         mock_state_2 = MagicMock()
         mock_state_2.next = []
+        mock_state_2.tasks = []
         mock_state_2.values = {"messages": [AIMessage(content="Done")]}
         
         mock_app.aget_state.side_effect = [mock_state_1, mock_state_2, mock_state_2]

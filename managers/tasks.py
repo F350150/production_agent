@@ -1,4 +1,7 @@
 from managers.database import get_db_conn, DB_LOCK
+from rich.console import Console
+
+console = Console()
 
 class TaskManager:
     """
@@ -44,7 +47,9 @@ class TaskManager:
                 )
                 get_db_conn().commit()
 
-            return f"Task {task_id} created: {subject}" + (f" (required: {required_role})" if required_role else "")
+            msg = f"Task {task_id} created: {subject}" + (f" (required: {required_role})" if required_role else "")
+            console.print(f"\n[bold green]✅ [TaskManager] {msg}[/bold green]")
+            return msg
 
     def update(self, task_id: int, status: str = None, add_blocked_by: list = None, add_blocks: list = None) -> str:
         """更新现存任务的状态或依赖树。常用于验证阶段（将 in_progress 标记为 completed）"""
@@ -68,7 +73,9 @@ class TaskManager:
                 (new_status, json.dumps(b_by), json.dumps(b_down), task_id)
             )
             get_db_conn().commit()
-            return f"Task {task_id} updated."
+            msg = f"Task {task_id} updated (status: {new_status})."
+            console.print(f"\n[bold green]✅ [TaskManager] {msg}[/bold green]")
+            return msg
 
     def claim(self, task_id: int, agent_name: str, agent_role: str = None) -> str:
         """
@@ -113,7 +120,9 @@ class TaskManager:
 
             get_db_conn().execute("UPDATE tasks SET status = 'in_progress', assigned_to = ? WHERE id = ?", (agent_name, task_id))
             get_db_conn().commit()
-            return f"Task {task_id} claimed by {agent_name}."
+            msg = f"Task {task_id} claimed by {agent_name}."
+            console.print(f"\n[bold green]✅ [TaskManager] {msg}[/bold green]")
+            return msg
 
     def get(self, task_id: int) -> str:
         """精确获取单个任务的详细信息"""

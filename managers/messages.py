@@ -1,6 +1,9 @@
 import json
 import time
 from managers.database import get_db_conn, DB_LOCK
+from rich.console import Console
+
+console = Console()
 
 # 预定义的合法消息类型，防止随意广播导致解析崩溃
 VALID_MSG_TYPES = {"message", "task_assignment", "plan_review_request", "plan_approval_response", "shutdown_request", "shutdown", "handover"}
@@ -20,12 +23,15 @@ class MessageBus:
                 (sender, recipient, content, msg_type, meta_str, time.time())
             )
             get_db_conn().commit()
+            
+        console.print(f"\n[bold blue]📬 [MessageBus] Sender '{sender}' sent a '{msg_type}' message to '{recipient}'.[/bold blue]")
         return f"Message sent to {recipient}."
 
     def broadcast(self, sender: str, content: str, recipient_list: list) -> str:
         """群发消息 API：主管通知全员时使用"""
         for r in recipient_list:
             self.send(sender, r, content, "message")
+        console.print(f"\n[bold blue]📢 [MessageBus] Sender '{sender}' broadcasted to {len(recipient_list)} agents.[/bold blue]")
         return f"Broadcasted to {len(recipient_list)} agents."
 
     def read_inbox(self, recipient: str) -> list:

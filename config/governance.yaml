@@ -21,6 +21,7 @@ dangerous_tools:
 role_permissions:
   ProductManager:
     - base_tools
+    - task_create
     - web_search
     - fetch_url
     - browser_open
@@ -29,6 +30,7 @@ role_permissions:
     - notify_say
   Architect:
     - base_tools
+    - spawn_subagent
     - read_file
     - web_search
     - use_skill
