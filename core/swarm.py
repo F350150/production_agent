@@ -60,7 +60,7 @@ from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, Remo
 from langgraph.prebuilt import create_react_agent
 from langgraph.graph import START, END, StateGraph
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.types import interrupt, Command
+from langgraph.types import interrupt, Command, StateSnapshot
 from langgraph_swarm import create_handoff_tool, SwarmState as BaseSwarmState
 
 # 业务模块依赖
@@ -424,7 +424,7 @@ class SwarmOrchestrator:
                 
             console.print("[bold yellow]Invalid input. Please enter 'y' to approve or 'n' to deny.[/bold yellow]")
 
-    async def _handle_hitl_approval(self, state: BaseSwarmState) -> tuple[bool, Optional[str]]:
+    async def _handle_hitl_approval(self, state: StateSnapshot) -> tuple[bool, Optional[str]]:
         """安全审批核心逻辑，判断是否被 interrupt 堵截并询问人类"""
         if not state.tasks:
             return False, None

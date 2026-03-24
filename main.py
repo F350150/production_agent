@@ -196,16 +196,12 @@ async def main():
                     console.print(hist_table)
                     continue
 
-                # 用户正常的聊天输入送入 ProductManager (图灵拓扑流水线的起点)
-                # 为什么要存入数据库？
-                # 异步解耦（Decoupling）：
-                #     用户发送指令后，系统第一时间存入inbox并返回“已收到”。后续Agent的处理可以异步进行，不需要用户在线等几分钟看大模型转圈。
-                # 可靠性与断点续传：
-                #     如果Agent在思考过程中程序崩溃或网络中断，重启后通过查询数据库就能知道：
-                #     “哦，用户最后给我的指令在这里，但我还没处理完。” 从而实现任务恢复。
-                # 审计与回溯（AuditTrail）：
-                #     数据库记录了完整的消息流转历史（谁在什么时间给谁发了什么）。这对于调试复杂的多Agent协作Bug简直是救命稻草。
-                swarm.inject_user_message("ProductManager", query)
+                # 拦截：查询是否有后台子节点 (Subagent) 刚做完任务发来的信件
+                inbox_msgs = BUS.read_inbox("User")
+                if inbox_msgs:
+                    reports = "\n\n".join([f"--- 📬 BACKGROUND AGENT REPORT FROM {m['from']} ---\n{m['content']}" for m in inbox_msgs])
+                    query = f"{reports}\n\n--- USER INSTRUCTION ---\n{query}"
+                    console.print(f"\n[bold cyan]📬 Fetched {len(inbox_msgs)} subagent report(s) from MessageBus and injected into context.[/bold cyan]")
 
                 try:
                     # 开始由引擎接管，执行并发异步循环。

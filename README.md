@@ -93,8 +93,18 @@ Agent 具备完整的计算机操控与自动化能力：
 如果你是 AI 开发初学者，我们为你准备了循序渐进的实验室指南：
 
 👉 **[点击开始：AI Beginner Lab 动手实验室](./docs/ai_beginner_lab.md)**
+👉 **[点击查阅：项目进阶高阶学习实战任务](./docs/agent_learning_tasks.md)**
 
-了解更多核心设计：
+📚 **深度学习架构图谱 (万字硬核导读)**：
+我们在此为你总结了极速掌握现代 AI 工程所需的**不仅限于本项目的行业底层架构解析**：
+- [🧠 Agent 架构设计与进阶演进地图](./plan_docs/agent.md)
+- [🔧 LLM Skill (专家技能体系) 深度探索](./plan_docs/skill.md)
+- [🔌 Model Context Protocol (MCP) 标准剖析](./plan_docs/mcp.md)
+- [🔍 Retrieval-Augmented Generation (RAG) 进阶指南](./plan_docs/rag.md)
+- [🧩 LangChain 深度架构与最佳实践](./plan_docs/langchain.md)
+- [🕸️ LangGraph 多智能体工作流架构](./plan_docs/langgraph.md)
+
+了解项目原生核心设计：
 - [多智能体 Swarm 编排协议](./docs/swarm_topology.md)
 - [状态管理与 SQLite 持久化](./docs/database_schema.md)
 - [工具发现与 MCP 协议](./docs/mcp_development.md)
